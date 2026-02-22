@@ -59,10 +59,14 @@ foreach ($objectFolder in $objectFolders) {
     $objectName = $objectFolder.Name
     Write-Host "Processing object: $objectName" -ForegroundColor White
 
-    $fitFiles = Get-ChildItem -Path $objectFolder.FullName -Filter "*.fit" -File
+    # Only copy individual light frames (Light_*.fit).
+    # ASIAIR also saves running in-camera stacks (Stacked*_*.fit) to the same
+    # folder; those must be excluded or ImageIntegration rejects nearly every
+    # frame due to wildly unequal PSF weights.
+    $fitFiles = Get-ChildItem -Path $objectFolder.FullName -Filter "Light_*.fit" -File
 
     if ($fitFiles.Count -eq 0) {
-        Write-Host "  No .fit files found, skipping." -ForegroundColor DarkGray
+        Write-Host "  No Light_*.fit files found, skipping." -ForegroundColor DarkGray
         continue
     }
 

@@ -409,18 +409,24 @@ function processSession(objectName, dateStr, sourceDir) {
     Console.writeln("Source : " + sourceDir);
     Console.writeln("=".repeat(40));
 
+    // Collect only individual light frames (Light_*.fit / Light_*.fits).
+    // ASIAIR also writes running in-camera stacks (Stacked*_*.fit) to the same
+    // folder; if those reach ImageIntegration their wildly unequal PSF weights
+    // cause nearly every frame to be rejected and the process aborts.
     var fitFiles = [];
     var fitExts = ["*.fit", "*.fits"];
     for (var ei = 0; ei < fitExts.length; ei++) {
         var fitFf = new FileFind;
         if (fitFf.begin(sourceDir + "/" + fitExts[ei])) {
-            do { if (!fitFf.isDirectory) fitFiles.push(sourceDir + "/" + fitFf.name); }
-            while (fitFf.next());
+            do {
+                if (!fitFf.isDirectory && /^Light_/i.test(fitFf.name))
+                    fitFiles.push(sourceDir + "/" + fitFf.name);
+            } while (fitFf.next());
             fitFf.end();
         }
     }
     if (fitFiles.length === 0) {
-        log("  WARNING: No .fit/.fits files found in " + sourceDir);
+        log("  WARNING: No Light_*.fit/.fits files found in " + sourceDir);
         return;
     }
     log("Found " + fitFiles.length + " light frames.");
