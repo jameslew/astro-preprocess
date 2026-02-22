@@ -1,6 +1,6 @@
 # astro-preprocess
 
-Automated astrophotography preprocessing pipeline for ZWO ASI533 MC Pro (OSC) with ASIAIR and PixInsight.
+Automated astrophotography preprocessing pipeline for ZWO ASI533 MC Pro (OSC) with ASIAIR and PixInsight. All code and scripts generated with Claude Code.
 
 ## Overview
 
