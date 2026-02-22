@@ -1,0 +1,10 @@
+# Claude Code working files
+.claude/
+
+# PowerShell cruft
+*.ps1xml
+
+# OS
+Thumbs.db
+desktop.ini
+.DS_Store
