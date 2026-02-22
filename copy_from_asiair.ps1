@@ -10,9 +10,7 @@
 #          .\copy_from_asiair.ps1
 # ============================================================
 
-$AsiairRoot       = "\\asiair\EMMC Images\Plan\Light"
-$NasRawRoot       = "Z:\RAW"
-$NasProcessedRoot = "Z:\processed"
+. "$PSScriptRoot\config.ps1"   # loads $AsiairRoot, $NasRawRoot, $NasProcessedRoot, $ProcessedSubDirs
 
 # ASIAIR guest access — no credentials needed
 # If prompted, just hit Enter with blank password
@@ -35,7 +33,7 @@ if (-not (Test-Path $NasRawRoot)) {
     try {
         New-Item -ItemType Directory -Path $NasRawRoot -Force | Out-Null
     } catch {
-        Write-Host "ERROR: Cannot reach NAS at Z:\  Is the drive mapped?" -ForegroundColor Red
+        Write-Host "ERROR: Cannot reach $NasRawRoot — is $NasDriveLetter mapped?" -ForegroundColor Red
         exit 1
     }
 }
@@ -113,7 +111,7 @@ foreach ($objectFolder in $objectFolders) {
     # Done once per session (not per file) and covers skipped/already-copied files.
     foreach ($dateStr in $sessionsForObject.Keys) {
         $processedSessionDir = Join-Path $NasProcessedRoot "$objectName\$dateStr"
-        foreach ($subDir in @("debayered", "registered", "master", "logs")) {
+        foreach ($subDir in $ProcessedSubDirs) {
             $fullSubDir = Join-Path $processedSessionDir $subDir
             if (-not (Test-Path $fullSubDir)) {
                 New-Item -ItemType Directory -Path $fullSubDir -Force | Out-Null

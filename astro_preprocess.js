@@ -19,10 +19,21 @@
 // ============================================================
 
 // ── Configuration ────────────────────────────────────────────
-var NAS_RAW_ROOT       = "Z:/RAW";
-var NAS_PROCESSED_ROOT = "Z:/processed";
-var BAYER_PATTERN      = 0;     // 0=RGGB (ASI533 MC Pro)
-var DRIZZLE_SCALE      = 2.0;
+// NAS paths: use forward slashes. Keep in sync with $NasRawRoot /
+// $NasProcessedRoot in config.ps1 (the PowerShell scripts share those values).
+var NAS_RAW_ROOT       = "Z:/RAW";       // Input: raw .fit/.fits files
+var NAS_PROCESSED_ROOT = "Z:/processed"; // Output: debayered, registered, master
+
+// Bayer pattern for your OSC camera:
+//   0 = RGGB  (ZWO ASI533 MC Pro, most ZWO colour cameras)
+//   1 = BGGR
+//   2 = GBRG
+//   3 = GRBG
+var BAYER_PATTERN = 0;
+
+// Drizzle output scale factor. 2.0 produces a 2× larger final stack.
+// Requires generateDrizzleData = true in StarAlignment (already set).
+var DRIZZLE_SCALE = 2.0;
 // ─────────────────────────────────────────────────────────────
 
 function fileExists(p) { return File.exists(p); }
@@ -409,7 +420,7 @@ function processSession(objectName, dateStr, sourceDir) {
         }
     }
     if (fitFiles.length === 0) {
-        log("  WARNING: No .fit files found in " + sourceDir);
+        log("  WARNING: No .fit/.fits files found in " + sourceDir);
         return;
     }
     log("Found " + fitFiles.length + " light frames.");

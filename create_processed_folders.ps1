@@ -8,8 +8,7 @@
 # sessions in RAW that haven't been processed yet.
 # ============================================================
 
-$NasRawRoot       = "Z:\RAW"
-$NasProcessedRoot = "Z:\processed"
+. "$PSScriptRoot\config.ps1"   # loads $NasRawRoot, $NasProcessedRoot, $ProcessedSubDirs
 
 Write-Host ""
 Write-Host "=======================================" -ForegroundColor Cyan
@@ -18,7 +17,7 @@ Write-Host "=======================================" -ForegroundColor Cyan
 Write-Host ""
 
 if (-not (Test-Path $NasRawRoot)) {
-    Write-Host "ERROR: Cannot reach $NasRawRoot — is Z: mapped?" -ForegroundColor Red
+    Write-Host "ERROR: Cannot reach $NasRawRoot — is $NasDriveLetter mapped?" -ForegroundColor Red
     exit 1
 }
 
@@ -29,7 +28,7 @@ foreach ($dateFolder in Get-ChildItem -Path $NasRawRoot -Directory) {
     foreach ($objectFolder in Get-ChildItem -Path $dateFolder.FullName -Directory) {
         $sessions++
         $sessionDir = Join-Path $NasProcessedRoot "$($objectFolder.Name)\$($dateFolder.Name)"
-        foreach ($sub in @("debayered", "registered", "master", "logs")) {
+        foreach ($sub in $ProcessedSubDirs) {
             $full = Join-Path $sessionDir $sub
             if (-not (Test-Path $full)) {
                 New-Item -ItemType Directory -Path $full -Force | Out-Null
