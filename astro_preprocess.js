@@ -403,6 +403,15 @@ function runDrizzleIntegration(drizzleFiles, outputFile) {
 
 // ── Session processor ────────────────────────────────────────
 function processSession(objectName, dateStr, sourceDir) {
+    // Skip sessions that completed on a previous run.
+    // To force a re-run, delete _processed.txt from the RAW session folder.
+    var sentinelFile = sourceDir + "/_processed.txt";
+    if (fileExists(sentinelFile)) {
+        Console.writeln("  Skipping [" + objectName + " / " + dateStr +
+                        "] — already processed. Delete _processed.txt to re-run.");
+        return;
+    }
+
     Console.writeln("\n" + "=".repeat(40));
     Console.writeln("Object : " + objectName);
     Console.writeln("Date   : " + dateStr);
@@ -472,6 +481,12 @@ function processSession(objectName, dateStr, sourceDir) {
         }
 
         log("\n\u2713 Complete [" + objectName + " / " + dateStr + "]");
+
+        // Write sentinel so subsequent runs skip this session automatically.
+        var sf = new File;
+        sf.createForWriting(sentinelFile);
+        sf.outTextLn("Processed: " + (new Date()).toISOString());
+        sf.close();
 
     } catch (e) {
         log("\n\u2717 ERROR [" + objectName + " / " + dateStr + "]: " + e.message);
