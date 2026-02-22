@@ -33,7 +33,7 @@ function ensureDir(p) {
     if (!File.directoryExists(p)) {
         var winPath = p.split("/").join("\\");
         var mk = new ExternalProcess;
-        mk.start("cmd.exe", ["/c", "mkdir", "\"" + winPath + "\"", "2>nul"]);
+        mk.start("cmd.exe", ["/c", "mkdir \"" + winPath + "\" 2>nul"]);
         mk.waitForFinished();
         if (!File.directoryExists(p))
             throw new Error("Folder missing — run create_processed_folders.ps1 first:\n  " + p);
@@ -112,8 +112,8 @@ function runDebayer(inputFiles, outputDir) {
         }
         // Close all windows before next sub to avoid memory accumulation
         var allWins2 = ImageWindow.windows;
-        for (var j = allWins2.length - 1; j >= 0; j--)
-            if (!allWins2[j].isNull) allWins2[j].close();
+        for (var k = allWins2.length - 1; k >= 0; k--)
+            if (!allWins2[k].isNull) allWins2[k].close();
 
         if (!saved)
             throw new Error("Debayer produced no RGB window for: " + base);
@@ -179,7 +179,7 @@ function runStarAlignment(inputFiles, outputDir) {
     SA.referenceImage               = inputFiles[0];
     SA.referenceIsFile              = true;
     SA.targets                      = targets;
-    SA.inputHints                   = "fits-keywords normalize only-first-image raw cfa use-roworder-keywords signed-is-physical";
+    SA.inputHints                   = "fits-keywords normalize only-first-image";
     SA.outputHints                  = "properties fits-keywords no-compress-data block-alignment 4096 max-inline-block-size 3072 no-embedded-data no-resolution no-icc-profile";
     SA.mode                         = StarAlignment.prototype.RegisterMatch;
     SA.writeKeywords                = true;
@@ -291,8 +291,6 @@ function runImageIntegration(registeredFiles, drizzleFiles, outputDir) {
     II.generateIntegratedImage          = true;
     II.generateDrizzleData              = true;
     II.closePreviousImages              = false;
-    II.bufferSizeMB                     = 16;
-    II.stackSizeMB                      = 1024;
     II.autoMemorySize                   = true;
     II.autoMemoryLimit                  = 0.75;
     II.useROI                           = false;
@@ -401,11 +399,14 @@ function processSession(objectName, dateStr, sourceDir) {
     Console.writeln("=".repeat(40));
 
     var fitFiles = [];
-    var ff = new FileFind;
-    if (ff.begin(sourceDir + "/*.fit")) {
-        do { if (!ff.isDirectory) fitFiles.push(sourceDir + "/" + ff.name); }
-        while (ff.next());
-        ff.end();
+    var fitExts = ["*.fit", "*.fits"];
+    for (var ei = 0; ei < fitExts.length; ei++) {
+        var fitFf = new FileFind;
+        if (fitFf.begin(sourceDir + "/" + fitExts[ei])) {
+            do { if (!fitFf.isDirectory) fitFiles.push(sourceDir + "/" + fitFf.name); }
+            while (fitFf.next());
+            fitFf.end();
+        }
     }
     if (fitFiles.length === 0) {
         log("  WARNING: No .fit files found in " + sourceDir);

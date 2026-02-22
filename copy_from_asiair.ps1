@@ -68,6 +68,10 @@ foreach ($objectFolder in $objectFolders) {
         continue
     }
 
+    # Track all date sessions seen for this object (including already-copied files)
+    # so processed folders are pre-created even when every file is skipped.
+    $sessionsForObject = @{}
+
     foreach ($file in $fitFiles) {
         if ($file.Name -match $filenameRegex) {
             $year  = $Matches[1]
@@ -79,6 +83,8 @@ foreach ($objectFolder in $objectFolders) {
             $dateStr = $file.LastWriteTime.ToString("yyyy-MM-dd")
             Write-Host "  WARNING: Could not parse date from '$($file.Name)', using file date $dateStr" -ForegroundColor Yellow
         }
+
+        $sessionsForObject[$dateStr] = $true  # record session regardless of copy outcome
 
         $destDir = Join-Path $NasRawRoot "$dateStr\$objectName"
 
@@ -101,8 +107,11 @@ foreach ($objectFolder in $objectFolders) {
             Write-Host "  ERROR copying $($file.Name): $_" -ForegroundColor Red
             $errorCount++
         }
+    }
 
-        # Pre-create the processed folder tree so PixInsight never has to
+    # Pre-create the processed folder tree for every session date seen.
+    # Done once per session (not per file) and covers skipped/already-copied files.
+    foreach ($dateStr in $sessionsForObject.Keys) {
         $processedSessionDir = Join-Path $NasProcessedRoot "$objectName\$dateStr"
         foreach ($subDir in @("debayered", "registered", "master", "logs")) {
             $fullSubDir = Join-Path $processedSessionDir $subDir

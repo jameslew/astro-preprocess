@@ -17,10 +17,17 @@ Write-Host "  Pre-create Processed Folders" -ForegroundColor Cyan
 Write-Host "=======================================" -ForegroundColor Cyan
 Write-Host ""
 
-$created = 0
+if (-not (Test-Path $NasRawRoot)) {
+    Write-Host "ERROR: Cannot reach $NasRawRoot — is Z: mapped?" -ForegroundColor Red
+    exit 1
+}
+
+$created  = 0
+$sessions = 0
 
 foreach ($dateFolder in Get-ChildItem -Path $NasRawRoot -Directory) {
     foreach ($objectFolder in Get-ChildItem -Path $dateFolder.FullName -Directory) {
+        $sessions++
         $sessionDir = Join-Path $NasProcessedRoot "$($objectFolder.Name)\$($dateFolder.Name)"
         foreach ($sub in @("debayered", "registered", "master", "logs")) {
             $full = Join-Path $sessionDir $sub
@@ -38,6 +45,6 @@ if ($created -eq 0) {
 }
 
 Write-Host ""
-Write-Host "  Done. $created folders created." -ForegroundColor Cyan
+Write-Host "  Done. $sessions sessions, $created folders created." -ForegroundColor Cyan
 Write-Host "=======================================" -ForegroundColor Cyan
 Write-Host ""
