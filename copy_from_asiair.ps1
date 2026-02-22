@@ -56,8 +56,12 @@ if ($objectFolders.Count -eq 0) {
 }
 
 foreach ($objectFolder in $objectFolders) {
-    $objectName = $objectFolder.Name
+    $objectName     = $objectFolder.Name
+    $destObjectName = if ($FriendlyNames.ContainsKey($objectName)) { $FriendlyNames[$objectName] } else { $objectName }
     Write-Host "Processing object: $objectName" -ForegroundColor White
+    if ($destObjectName -ne $objectName) {
+        Write-Host "  → $destObjectName" -ForegroundColor DarkCyan
+    }
 
     # Only copy individual light frames (Light_*.fit).
     # ASIAIR also saves running in-camera stacks (Stacked*_*.fit) to the same
@@ -88,7 +92,7 @@ foreach ($objectFolder in $objectFolders) {
 
         $sessionsForObject[$dateStr] = $true  # record session regardless of copy outcome
 
-        $destDir = Join-Path $NasRawRoot "$dateStr\$objectName"
+        $destDir = Join-Path $NasRawRoot "$dateStr\$destObjectName"
 
         if (-not (Test-Path $destDir)) {
             New-Item -ItemType Directory -Path $destDir -Force | Out-Null
@@ -114,7 +118,7 @@ foreach ($objectFolder in $objectFolders) {
     # Pre-create the processed folder tree for every session date seen.
     # Done once per session (not per file) and covers skipped/already-copied files.
     foreach ($dateStr in $sessionsForObject.Keys) {
-        $processedSessionDir = Join-Path $NasProcessedRoot "$objectName\$dateStr"
+        $processedSessionDir = Join-Path $NasProcessedRoot "$destObjectName\$dateStr"
         foreach ($subDir in $ProcessedSubDirs) {
             $fullSubDir = Join-Path $processedSessionDir $subDir
             if (-not (Test-Path $fullSubDir)) {
