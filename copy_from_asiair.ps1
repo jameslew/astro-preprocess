@@ -10,9 +10,7 @@
 #          .\copy_from_asiair.ps1
 # ============================================================
 
-$AsiairRoot       = "\\asiair\EMMC Images\Plan\Light"
-$NasRawRoot       = "Z:\RAW"
-$NasProcessedRoot = "Z:\processed"
+. "$PSScriptRoot\config.ps1"   # loads $AsiairRoot, $NasRawRoot, $NasProcessedRoot, $ProcessedSubDirs
 
 # ASIAIR guest access — no credentials needed
 # If prompted, just hit Enter with blank password
@@ -35,7 +33,7 @@ if (-not (Test-Path $NasRawRoot)) {
     try {
         New-Item -ItemType Directory -Path $NasRawRoot -Force | Out-Null
     } catch {
-        Write-Host "ERROR: Cannot reach NAS at Z:\  Is the drive mapped?" -ForegroundColor Red
+        Write-Host "ERROR: Cannot reach $NasRawRoot — is $NasDriveLetter mapped?" -ForegroundColor Red
         exit 1
     }
 }
@@ -61,12 +59,20 @@ foreach ($objectFolder in $objectFolders) {
     $objectName = $objectFolder.Name
     Write-Host "Processing object: $objectName" -ForegroundColor White
 
-    $fitFiles = Get-ChildItem -Path $objectFolder.FullName -Filter "*.fit" -File
+    # Only copy individual light frames (Light_*.fit).
+    # ASIAIR also saves running in-camera stacks (Stacked*_*.fit) to the same
+    # folder; those must be excluded or ImageIntegration rejects nearly every
+    # frame due to wildly unequal PSF weights.
+    $fitFiles = Get-ChildItem -Path $objectFolder.FullName -Filter "Light_*.fit" -File
 
     if ($fitFiles.Count -eq 0) {
-        Write-Host "  No .fit files found, skipping." -ForegroundColor DarkGray
+        Write-Host "  No Light_*.fit files found, skipping." -ForegroundColor DarkGray
         continue
     }
+
+    # Track all date sessions seen for this object (including already-copied files)
+    # so processed folders are pre-created even when every file is skipped.
+    $sessionsForObject = @{}
 
     foreach ($file in $fitFiles) {
         if ($file.Name -match $filenameRegex) {
@@ -79,6 +85,8 @@ foreach ($objectFolder in $objectFolders) {
             $dateStr = $file.LastWriteTime.ToString("yyyy-MM-dd")
             Write-Host "  WARNING: Could not parse date from '$($file.Name)', using file date $dateStr" -ForegroundColor Yellow
         }
+
+        $sessionsForObject[$dateStr] = $true  # record session regardless of copy outcome
 
         $destDir = Join-Path $NasRawRoot "$dateStr\$objectName"
 
@@ -101,10 +109,13 @@ foreach ($objectFolder in $objectFolders) {
             Write-Host "  ERROR copying $($file.Name): $_" -ForegroundColor Red
             $errorCount++
         }
+    }
 
-        # Pre-create the processed folder tree so PixInsight never has to
+    # Pre-create the processed folder tree for every session date seen.
+    # Done once per session (not per file) and covers skipped/already-copied files.
+    foreach ($dateStr in $sessionsForObject.Keys) {
         $processedSessionDir = Join-Path $NasProcessedRoot "$objectName\$dateStr"
-        foreach ($subDir in @("debayered", "registered", "master", "logs")) {
+        foreach ($subDir in $ProcessedSubDirs) {
             $fullSubDir = Join-Path $processedSessionDir $subDir
             if (-not (Test-Path $fullSubDir)) {
                 New-Item -ItemType Directory -Path $fullSubDir -Force | Out-Null

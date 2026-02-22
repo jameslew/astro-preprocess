@@ -19,10 +19,21 @@
 // ============================================================
 
 // ── Configuration ────────────────────────────────────────────
-var NAS_RAW_ROOT       = "Z:/RAW";
-var NAS_PROCESSED_ROOT = "Z:/processed";
-var BAYER_PATTERN      = 0;     // 0=RGGB (ASI533 MC Pro)
-var DRIZZLE_SCALE      = 2.0;
+// NAS paths: use forward slashes. Keep in sync with $NasRawRoot /
+// $NasProcessedRoot in config.ps1 (the PowerShell scripts share those values).
+var NAS_RAW_ROOT       = "Z:/RAW";       // Input: raw .fit/.fits files
+var NAS_PROCESSED_ROOT = "Z:/processed"; // Output: debayered, registered, master
+
+// Bayer pattern for your OSC camera:
+//   0 = RGGB  (ZWO ASI533 MC Pro, most ZWO colour cameras)
+//   1 = BGGR
+//   2 = GBRG
+//   3 = GRBG
+var BAYER_PATTERN = 0;
+
+// Drizzle output scale factor. 2.0 produces a 2× larger final stack.
+// Requires generateDrizzleData = true in StarAlignment (already set).
+var DRIZZLE_SCALE = 2.0;
 // ─────────────────────────────────────────────────────────────
 
 function fileExists(p) { return File.exists(p); }
@@ -33,11 +44,28 @@ function ensureDir(p) {
     if (!File.directoryExists(p)) {
         var winPath = p.split("/").join("\\");
         var mk = new ExternalProcess;
-        mk.start("cmd.exe", ["/c", "mkdir", "\"" + winPath + "\"", "2>nul"]);
+        mk.start("cmd.exe", ["/c", "mkdir \"" + winPath + "\" 2>nul"]);
         mk.waitForFinished();
         if (!File.directoryExists(p))
             throw new Error("Folder missing — run create_processed_folders.ps1 first:\n  " + p);
     }
+}
+
+// Remove files in dir whose names do not start with "Light_".
+// Cleans up stale artefacts written by earlier runs of the old script
+// that lacked the Light_-only filter (e.g. Stacked*_d.xisf files).
+function removeNonLightFiles(dir) {
+    var removed = 0;
+    var ff = new FileFind;
+    if (!ff.begin(dir + "/*")) return 0;
+    do {
+        if (!ff.isDirectory && !/^Light_/i.test(ff.name)) {
+            File.remove(dir + "/" + ff.name);
+            removed++;
+        }
+    } while (ff.next());
+    ff.end();
+    return removed;
 }
 
 function closeAllWindows() {
@@ -112,8 +140,8 @@ function runDebayer(inputFiles, outputDir) {
         }
         // Close all windows before next sub to avoid memory accumulation
         var allWins2 = ImageWindow.windows;
-        for (var j = allWins2.length - 1; j >= 0; j--)
-            if (!allWins2[j].isNull) allWins2[j].close();
+        for (var k = allWins2.length - 1; k >= 0; k--)
+            if (!allWins2[k].isNull) allWins2[k].close();
 
         if (!saved)
             throw new Error("Debayer produced no RGB window for: " + base);
@@ -179,7 +207,7 @@ function runStarAlignment(inputFiles, outputDir) {
     SA.referenceImage               = inputFiles[0];
     SA.referenceIsFile              = true;
     SA.targets                      = targets;
-    SA.inputHints                   = "fits-keywords normalize only-first-image raw cfa use-roworder-keywords signed-is-physical";
+    SA.inputHints                   = "fits-keywords normalize only-first-image";
     SA.outputHints                  = "properties fits-keywords no-compress-data block-alignment 4096 max-inline-block-size 3072 no-embedded-data no-resolution no-icc-profile";
     SA.mode                         = StarAlignment.prototype.RegisterMatch;
     SA.writeKeywords                = true;
@@ -291,8 +319,6 @@ function runImageIntegration(registeredFiles, drizzleFiles, outputDir) {
     II.generateIntegratedImage          = true;
     II.generateDrizzleData              = true;
     II.closePreviousImages              = false;
-    II.bufferSizeMB                     = 16;
-    II.stackSizeMB                      = 1024;
     II.autoMemorySize                   = true;
     II.autoMemoryLimit                  = 0.75;
     II.useROI                           = false;
@@ -394,22 +420,40 @@ function runDrizzleIntegration(drizzleFiles, outputFile) {
 
 // ── Session processor ────────────────────────────────────────
 function processSession(objectName, dateStr, sourceDir) {
+    // Skip sessions that completed on a previous run.
+    // To force a re-run, delete _processed.txt from the RAW session folder.
+    var sentinelFile = sourceDir + "/_processed.txt";
+    if (fileExists(sentinelFile)) {
+        Console.writeln("  Skipping [" + objectName + " / " + dateStr +
+                        "] — already processed. Delete _processed.txt to re-run.");
+        return null;
+    }
+
     Console.writeln("\n" + "=".repeat(40));
     Console.writeln("Object : " + objectName);
     Console.writeln("Date   : " + dateStr);
     Console.writeln("Source : " + sourceDir);
     Console.writeln("=".repeat(40));
 
+    // Collect only individual light frames (Light_*.fit / Light_*.fits).
+    // ASIAIR also writes running in-camera stacks (Stacked*_*.fit) to the same
+    // folder; if those reach ImageIntegration their wildly unequal PSF weights
+    // cause nearly every frame to be rejected and the process aborts.
     var fitFiles = [];
-    var ff = new FileFind;
-    if (ff.begin(sourceDir + "/*.fit")) {
-        do { if (!ff.isDirectory) fitFiles.push(sourceDir + "/" + ff.name); }
-        while (ff.next());
-        ff.end();
+    var fitExts = ["*.fit", "*.fits"];
+    for (var ei = 0; ei < fitExts.length; ei++) {
+        var fitFf = new FileFind;
+        if (fitFf.begin(sourceDir + "/" + fitExts[ei])) {
+            do {
+                if (!fitFf.isDirectory && /^Light_/i.test(fitFf.name))
+                    fitFiles.push(sourceDir + "/" + fitFf.name);
+            } while (fitFf.next());
+            fitFf.end();
+        }
     }
     if (fitFiles.length === 0) {
-        log("  WARNING: No .fit files found in " + sourceDir);
-        return;
+        log("  WARNING: No Light_*.fit/.fits files found in " + sourceDir);
+        return null;
     }
     log("Found " + fitFiles.length + " light frames.");
 
@@ -425,7 +469,13 @@ function processSession(objectName, dateStr, sourceDir) {
     ensureDir(logsDir);
     logOpen(logsDir);
 
+    var finalOutput = null;
     try {
+        // Purge any non-Light_ files left behind by earlier runs of the old script.
+        var staleCount = removeNonLightFiles(debayeredDir) + removeNonLightFiles(registeredDir);
+        if (staleCount > 0)
+            log("  Removed " + staleCount + " stale non-Light_ file(s) from previous run.");
+
         log("\n[1/4] Debayer (RGGB/VNG)...");
         var dbFiles = runDebayer(fitFiles, debayeredDir);
         closeAllWindows();
@@ -449,28 +499,41 @@ function processSession(objectName, dateStr, sourceDir) {
                 objectName.replace(/ /g, "_") + "_" + dateStr + ".xisf";
             runDrizzleIntegration(saResult.drizzle, drizzleOut);
             closeAllWindows();
+            finalOutput = drizzleOut;
         } else {
             log("\n[4/4] WARNING: DrizzleIntegration skipped — no .xdrz files.");
+            finalOutput = masterDir + "/integration.xisf";
         }
 
         log("\n\u2713 Complete [" + objectName + " / " + dateStr + "]");
+
+        // Write sentinel so subsequent runs skip this session automatically.
+        var sf = new File;
+        sf.createForWriting(sentinelFile);
+        sf.outTextLn("Processed: " + (new Date()).toISOString());
+        sf.close();
 
     } catch (e) {
         log("\n\u2717 ERROR [" + objectName + " / " + dateStr + "]: " + e.message);
         closeAllWindows();
     }
     logClose();
+    return finalOutput;  // null on error/skip, output path on success
 }
 
 // ── Folder scanner ───────────────────────────────────────────
 function processDateDir(dateDir, dateStr) {
+    var outputs = [];
     var ff = new FileFind;
-    if (!ff.begin(dateDir + "/*")) return;
+    if (!ff.begin(dateDir + "/*")) return outputs;
     do {
-        if (ff.isDirectory && ff.name !== "." && ff.name !== "..")
-            processSession(ff.name, dateStr, dateDir + "/" + ff.name);
+        if (ff.isDirectory && ff.name !== "." && ff.name !== "..") {
+            var result = processSession(ff.name, dateStr, dateDir + "/" + ff.name);
+            if (result !== null) outputs.push(result);
+        }
     } while (ff.next());
     ff.end();
+    return outputs;
 }
 
 // ── Main ─────────────────────────────────────────────────────
@@ -488,14 +551,17 @@ if (!dlg.execute()) {
     var sel = dlg.directory;
     Console.writeln("\nSelected: " + sel);
 
+    var allOutputs = [];
+
     if (/\d{4}-\d{2}-\d{2}$/.test(sel)) {
-        processDateDir(sel, sel.replace(/.*[\/\\]/, ""));
+        allOutputs = processDateDir(sel, sel.replace(/.*[\/\\]/, ""));
     } else {
         var ff = new FileFind;
         if (ff.begin(sel + "/*")) {
             do {
                 if (ff.isDirectory && /^\d{4}-\d{2}-\d{2}$/.test(ff.name))
-                    processDateDir(sel + "/" + ff.name, ff.name);
+                    allOutputs = allOutputs.concat(
+                        processDateDir(sel + "/" + ff.name, ff.name));
             } while (ff.next());
             ff.end();
         }
@@ -505,4 +571,15 @@ if (!dlg.execute()) {
     Console.writeln("All sessions complete.");
     Console.writeln("Results in: " + NAS_PROCESSED_ROOT);
     Console.writeln("=".repeat(40));
+
+    // Open every final image so they are ready for post-processing.
+    if (allOutputs.length > 0) {
+        Console.writeln("\nOpening " + allOutputs.length + " final image(s)...");
+        for (var oi = 0; oi < allOutputs.length; oi++) {
+            Console.writeln("  " + allOutputs[oi]);
+            var outWins = ImageWindow.open(allOutputs[oi]);
+            if (outWins && outWins.length > 0 && !outWins[0].isNull)
+                outWins[0].show();
+        }
+    }
 }
