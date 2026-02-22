@@ -409,7 +409,7 @@ function processSession(objectName, dateStr, sourceDir) {
     if (fileExists(sentinelFile)) {
         Console.writeln("  Skipping [" + objectName + " / " + dateStr +
                         "] — already processed. Delete _processed.txt to re-run.");
-        return;
+        return null;
     }
 
     Console.writeln("\n" + "=".repeat(40));
@@ -436,7 +436,7 @@ function processSession(objectName, dateStr, sourceDir) {
     }
     if (fitFiles.length === 0) {
         log("  WARNING: No Light_*.fit/.fits files found in " + sourceDir);
-        return;
+        return null;
     }
     log("Found " + fitFiles.length + " light frames.");
 
@@ -452,6 +452,7 @@ function processSession(objectName, dateStr, sourceDir) {
     ensureDir(logsDir);
     logOpen(logsDir);
 
+    var finalOutput = null;
     try {
         log("\n[1/4] Debayer (RGGB/VNG)...");
         var dbFiles = runDebayer(fitFiles, debayeredDir);
@@ -476,8 +477,10 @@ function processSession(objectName, dateStr, sourceDir) {
                 objectName.replace(/ /g, "_") + "_" + dateStr + ".xisf";
             runDrizzleIntegration(saResult.drizzle, drizzleOut);
             closeAllWindows();
+            finalOutput = drizzleOut;
         } else {
             log("\n[4/4] WARNING: DrizzleIntegration skipped — no .xdrz files.");
+            finalOutput = masterDir + "/integration.xisf";
         }
 
         log("\n\u2713 Complete [" + objectName + " / " + dateStr + "]");
@@ -493,17 +496,22 @@ function processSession(objectName, dateStr, sourceDir) {
         closeAllWindows();
     }
     logClose();
+    return finalOutput;  // null on error/skip, output path on success
 }
 
 // ── Folder scanner ───────────────────────────────────────────
 function processDateDir(dateDir, dateStr) {
+    var outputs = [];
     var ff = new FileFind;
-    if (!ff.begin(dateDir + "/*")) return;
+    if (!ff.begin(dateDir + "/*")) return outputs;
     do {
-        if (ff.isDirectory && ff.name !== "." && ff.name !== "..")
-            processSession(ff.name, dateStr, dateDir + "/" + ff.name);
+        if (ff.isDirectory && ff.name !== "." && ff.name !== "..") {
+            var result = processSession(ff.name, dateStr, dateDir + "/" + ff.name);
+            if (result !== null) outputs.push(result);
+        }
     } while (ff.next());
     ff.end();
+    return outputs;
 }
 
 // ── Main ─────────────────────────────────────────────────────
@@ -521,14 +529,17 @@ if (!dlg.execute()) {
     var sel = dlg.directory;
     Console.writeln("\nSelected: " + sel);
 
+    var allOutputs = [];
+
     if (/\d{4}-\d{2}-\d{2}$/.test(sel)) {
-        processDateDir(sel, sel.replace(/.*[\/\\]/, ""));
+        allOutputs = processDateDir(sel, sel.replace(/.*[\/\\]/, ""));
     } else {
         var ff = new FileFind;
         if (ff.begin(sel + "/*")) {
             do {
                 if (ff.isDirectory && /^\d{4}-\d{2}-\d{2}$/.test(ff.name))
-                    processDateDir(sel + "/" + ff.name, ff.name);
+                    allOutputs = allOutputs.concat(
+                        processDateDir(sel + "/" + ff.name, ff.name));
             } while (ff.next());
             ff.end();
         }
@@ -538,4 +549,15 @@ if (!dlg.execute()) {
     Console.writeln("All sessions complete.");
     Console.writeln("Results in: " + NAS_PROCESSED_ROOT);
     Console.writeln("=".repeat(40));
+
+    // Open every final image so they are ready for post-processing.
+    if (allOutputs.length > 0) {
+        Console.writeln("\nOpening " + allOutputs.length + " final image(s)...");
+        for (var oi = 0; oi < allOutputs.length; oi++) {
+            Console.writeln("  " + allOutputs[oi]);
+            var outWins = ImageWindow.open(allOutputs[oi]);
+            if (outWins && outWins.length > 0 && !outWins[0].isNull)
+                outWins[0].show();
+        }
+    }
 }
