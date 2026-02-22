@@ -51,6 +51,23 @@ function ensureDir(p) {
     }
 }
 
+// Remove files in dir whose names do not start with "Light_".
+// Cleans up stale artefacts written by earlier runs of the old script
+// that lacked the Light_-only filter (e.g. Stacked*_d.xisf files).
+function removeNonLightFiles(dir) {
+    var removed = 0;
+    var ff = new FileFind;
+    if (!ff.begin(dir + "/*")) return 0;
+    do {
+        if (!ff.isDirectory && !/^Light_/i.test(ff.name)) {
+            File.remove(dir + "/" + ff.name);
+            removed++;
+        }
+    } while (ff.next());
+    ff.end();
+    return removed;
+}
+
 function closeAllWindows() {
     var wins = ImageWindow.windows;
     for (var i = wins.length - 1; i >= 0; i--)
@@ -454,6 +471,11 @@ function processSession(objectName, dateStr, sourceDir) {
 
     var finalOutput = null;
     try {
+        // Purge any non-Light_ files left behind by earlier runs of the old script.
+        var staleCount = removeNonLightFiles(debayeredDir) + removeNonLightFiles(registeredDir);
+        if (staleCount > 0)
+            log("  Removed " + staleCount + " stale non-Light_ file(s) from previous run.");
+
         log("\n[1/4] Debayer (RGGB/VNG)...");
         var dbFiles = runDebayer(fitFiles, debayeredDir);
         closeAllWindows();
