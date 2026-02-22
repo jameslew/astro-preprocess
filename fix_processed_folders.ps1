@@ -56,6 +56,15 @@ function Get-Description ([string]$FolderName) {
     return ''
 }
 
+# Remove characters that are unsafe in folder names:
+#   apostrophes, Windows-reserved chars (\ / : * ? " < > |), and
+#   collapse any resulting runs of spaces.
+function Sanitize-Name ([string]$Name) {
+    $s = $Name -replace "['\\/:\*\?`"<>\|]", ''   # strip unsafe chars
+    $s = $s -replace '\s{2,}', ' '                 # collapse double-spaces
+    return $s.Trim()
+}
+
 # Recursively move the contents of $Src into $Dst.
 # Subdirectories are merged; files are skipped if they already exist.
 function Merge-Folder ([string]$Src, [string]$Dst) {
@@ -136,8 +145,9 @@ foreach ($group in $groups) {
 
     # Canonical name: FriendlyNames table wins; otherwise build from the
     # longest descriptive suffix found among the group's folder names.
+    # Either way, sanitize to remove apostrophes and other unsafe chars.
     if ($FriendlyNames.ContainsKey($catalogId)) {
-        $canonicalName = $FriendlyNames[$catalogId]
+        $canonicalName = Sanitize-Name $FriendlyNames[$catalogId]
     }
     else {
         $bestDesc = ''
@@ -145,7 +155,8 @@ foreach ($group in $groups) {
             $d = Get-Description $m.Folder.Name
             if ($d.Length -gt $bestDesc.Length) { $bestDesc = $d }
         }
-        $canonicalName = if ($bestDesc) { "$catalogId - $bestDesc" } else { $catalogId }
+        $raw = if ($bestDesc) { "$catalogId - $bestDesc" } else { $catalogId }
+        $canonicalName = Sanitize-Name $raw
     }
 
     $canonicalPath = Join-Path $ProcessedRoot $canonicalName
