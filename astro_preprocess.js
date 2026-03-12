@@ -19,10 +19,13 @@
 // ============================================================
 
 // ── Configuration ────────────────────────────────────────────
-// NAS paths: use forward slashes. Keep in sync with $NasRawRoot /
-// $NasProcessedRoot in config.ps1 (the PowerShell scripts share those values).
-var NAS_RAW_ROOT       = "Z:/RAW";       // Input: raw .fit/.fits files
-var NAS_PROCESSED_ROOT = "Z:/processed"; // Output: debayered, registered, master
+var isWindows = CoreApplication.platform === "MSWINDOWS";
+
+// NAS paths — actual folder names on the share are "Raw" and "Processed".
+// Windows: edit the drive letter if your NAS is mapped differently.
+// macOS:   edit the volume name if your NAS mounts under a different name.
+var NAS_RAW_ROOT       = isWindows ? "Z:/Raw"       : "/Volumes/Astro/Raw";
+var NAS_PROCESSED_ROOT = isWindows ? "Z:/Processed" : "/Volumes/Astro/Processed";
 
 // Bayer pattern for your OSC camera:
 //   0 = RGGB  (ZWO ASI533 MC Pro, most ZWO colour cameras)
@@ -39,15 +42,19 @@ var DRIZZLE_SCALE = 2.0;
 function fileExists(p) { return File.exists(p); }
 
 function ensureDir(p) {
-    // Folders are pre-created by copy_from_asiair.ps1.
-    // cmd.exe fallback handles any edge cases PI cannot manage itself.
+    // Folders are pre-created by create_processed_folders.ps1 (run from Windows).
+    // Shell fallback handles any edge cases PI cannot manage itself.
     if (!File.directoryExists(p)) {
-        var winPath = p.split("/").join("\\");
         var mk = new ExternalProcess;
-        mk.start("cmd.exe", ["/c", "mkdir \"" + winPath + "\" 2>nul"]);
+        if (isWindows) {
+            var winPath = p.split("/").join("\\");
+            mk.start("cmd.exe", ["/c", "mkdir \"" + winPath + "\" 2>nul"]);
+        } else {
+            mk.start("/bin/mkdir", ["-p", p]);
+        }
         mk.waitForFinished();
         if (!File.directoryExists(p))
-            throw new Error("Folder missing — run create_processed_folders.ps1 first:\n  " + p);
+            throw new Error("Folder missing — could not create:\n  " + p);
     }
 }
 
