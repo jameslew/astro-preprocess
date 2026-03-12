@@ -25,9 +25,13 @@ $created  = 0
 $sessions = 0
 
 foreach ($dateFolder in Get-ChildItem -Path $NasRawRoot -Directory) {
+    $dateSessions = [System.Collections.Generic.List[PSObject]]::new()
+
     foreach ($objectFolder in Get-ChildItem -Path $dateFolder.FullName -Directory) {
         $sessions++
         $sessionDir = Join-Path $NasProcessedRoot "$($objectFolder.Name)\$($dateFolder.Name)"
+        $dateSessions.Add([PSCustomObject]@{ Object = $objectFolder.Name; Path = $sessionDir })
+
         foreach ($sub in $ProcessedSubDirs) {
             $full = Join-Path $sessionDir $sub
             if (-not (Test-Path $full)) {
@@ -36,6 +40,20 @@ foreach ($dateFolder in Get-ChildItem -Path $NasRawRoot -Directory) {
                 $created++
             }
         }
+    }
+
+    if ($dateSessions.Count -gt 0) {
+        $summaryPath = Join-Path $dateFolder.FullName "_processed_paths.txt"
+        $lines = @(
+            "# Processed locations for $($dateFolder.Name)",
+            "# Generated $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')",
+            ""
+        )
+        foreach ($s in $dateSessions) {
+            $lines += "$($s.Object.PadRight(30)) $($s.Path)"
+        }
+        $lines | Set-Content -Path $summaryPath -Encoding UTF8
+        Write-Host "  Written: $summaryPath" -ForegroundColor DarkCyan
     }
 }
 
