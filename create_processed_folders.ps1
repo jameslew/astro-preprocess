@@ -17,7 +17,7 @@ Write-Host "=======================================" -ForegroundColor Cyan
 Write-Host ""
 
 if (-not (Test-Path $NasRawRoot)) {
-    Write-Host "ERROR: Cannot reach $NasRawRoot — is $NasDriveLetter mapped?" -ForegroundColor Red
+    Write-Host "ERROR: Cannot reach $NasRawRoot - is $NasDriveLetter mapped?" -ForegroundColor Red
     exit 1
 }
 
