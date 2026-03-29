@@ -62,6 +62,7 @@ $FriendlyNames = @{
     "M 64"  = "M 64 - Black Eye Galaxy"
     "M 74"  = "M 74 - Phantom Galaxy"
     "M 76"  = "M 76 - Little Dumbbell Nebula"
+    "M 78"  = "M 78 - Orion Reflection Nebula"
     "M 81"  = "M 81 - Bodes Galaxy"
     "M 82"  = "M 82 - Cigar Galaxy"
     "M 83"  = "M 83 - Southern Pinwheel Galaxy"
@@ -103,6 +104,7 @@ $FriendlyNames = @{
     "M64"   = "M 64 - Black Eye Galaxy"
     "M74"   = "M 74 - Phantom Galaxy"
     "M76"   = "M 76 - Little Dumbbell Nebula"
+    "M78"   = "M 78 - Orion Reflection Nebula"
     "M81"   = "M 81 - Bodes Galaxy"
     "M82"   = "M 82 - Cigar Galaxy"
     "M83"   = "M 83 - Southern Pinwheel Galaxy"
@@ -167,6 +169,12 @@ $FriendlyNames = @{
     "IC 2177" = "IC 2177 - Seagull Nebula"
     "IC 5070" = "IC 5070 - Pelican Nebula"
     "IC 5146" = "IC 5146 - Cocoon Nebula"
+
+    # ── Alternate / alias names ──────────────────────────────
+    # ASIAIR plan names that don't match the catalog ID exactly,
+    # or cross-catalog corrections (e.g. NGC vs IC mix-ups).
+    "Flaming Star" = "IC 405 - Flaming Star Nebula"
+    "NGC 5070"     = "IC 5070 - Pelican Nebula"
 
     # ── Add your own below ───────────────────────────────────
 }
