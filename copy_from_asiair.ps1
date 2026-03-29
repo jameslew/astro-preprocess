@@ -57,7 +57,7 @@ if ($objectFolders.Count -eq 0) {
 
 foreach ($objectFolder in $objectFolders) {
     $objectName     = $objectFolder.Name
-    $destObjectName = if ($FriendlyNames.ContainsKey($objectName)) { $FriendlyNames[$objectName] } else { $objectName }
+    $destObjectName = Sanitize-Name $(if ($FriendlyNames.ContainsKey($objectName)) { $FriendlyNames[$objectName] } else { $objectName })
     Write-Host "Processing object: $objectName" -ForegroundColor White
     if ($destObjectName -ne $objectName) {
         Write-Host "  → $destObjectName" -ForegroundColor DarkCyan
