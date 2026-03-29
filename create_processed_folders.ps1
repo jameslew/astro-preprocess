@@ -29,8 +29,10 @@ foreach ($dateFolder in Get-ChildItem -Path $NasRawRoot -Directory) {
 
     foreach ($objectFolder in Get-ChildItem -Path $dateFolder.FullName -Directory) {
         $sessions++
-        $sessionDir = Join-Path $NasProcessedRoot "$($objectFolder.Name)\$($dateFolder.Name)"
-        $dateSessions.Add([PSCustomObject]@{ Object = $objectFolder.Name; Path = $sessionDir })
+        $rawName    = $objectFolder.Name
+        $destName   = Sanitize-Name $(if ($FriendlyNames.ContainsKey($rawName)) { $FriendlyNames[$rawName] } else { $rawName })
+        $sessionDir = Join-Path $NasProcessedRoot "$destName\$($dateFolder.Name)"
+        $dateSessions.Add([PSCustomObject]@{ Object = $destName; Path = $sessionDir })
 
         foreach ($sub in $ProcessedSubDirs) {
             $full = Join-Path $sessionDir $sub
