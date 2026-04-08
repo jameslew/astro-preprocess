@@ -57,6 +57,10 @@ var BAYER_PATTERN = 0;
 var DRIZZLE_SCALE = 2.0;
 // ─────────────────────────────────────────────────────────────
 
+// Mosaic panel suffix pattern: objectName ends with _<row>-<col>
+// e.g. "NGC 4884_1-2" -> base "NGC 4884", panel "1-2"
+var MOSAIC_PANEL_RE = /^(.+)_(\d+-\d+)$/;
+
 function fileExists(p) { return File.exists(p); }
 
 function ensureDir(p) {
@@ -697,7 +701,10 @@ function runDrizzleIntegration(drizzleFiles, outputFile) {
 }
 
 // ── Session processor ────────────────────────────────────────
-function processSession(objectName, dateStr, sourceDir) {
+// processedBase: optional override for the processed output root path.
+//   Non-mosaic: NAS_PROCESSED_ROOT/<objectName>/<dateStr>
+//   Mosaic panel: NAS_PROCESSED_ROOT/<friendlyBase>/<dateStr>/<panelName>
+function processSession(objectName, dateStr, sourceDir, processedBase) {
     // Skip sessions that completed on a previous run.
     // To force a re-run, delete _processed.txt from the RAW session folder.
     var sentinelFile = sourceDir + "/_processed.txt";
@@ -735,7 +742,7 @@ function processSession(objectName, dateStr, sourceDir) {
     // Detect dominant light exposure for dark matching
     var lightExp = dominantExposure(fitFiles);  // e.g. "120.0"
 
-    var base          = NAS_PROCESSED_ROOT + "/" + objectName + "/" + dateStr;
+    var base          = processedBase || (NAS_PROCESSED_ROOT + "/" + objectName + "/" + dateStr);
     var debayeredDir  = base + "/debayered";
     var calibratedDir = base + "/calibrated";
     var registeredDir = base + "/registered";
@@ -887,17 +894,55 @@ function processSession(objectName, dateStr, sourceDir) {
 }
 
 // ── Folder scanner ───────────────────────────────────────────
+// Detects mosaic panels (objectName matching _N-N suffix), groups them
+// under a shared processed parent folder, and processes each panel
+// independently through the full pipeline.
 function processDateDir(dateDir, dateStr) {
     var outputs = [];
+
+    // Collect all object subdirectories, skipping darks/flats
+    var objectDirs = [];
     var ff = new FileFind;
     if (!ff.begin(dateDir + "/*")) return outputs;
     do {
-        if (ff.isDirectory && ff.name !== "." && ff.name !== "..") {
-            var result = processSession(ff.name, dateStr, dateDir + "/" + ff.name);
-            if (result !== null) outputs.push(result);
+        if (ff.isDirectory && ff.name !== "." && ff.name !== ".." &&
+                ff.name !== "darks" && ff.name !== "flats") {
+            objectDirs.push(ff.name);
         }
     } while (ff.next());
     ff.end();
+
+    // Group by base object name (strip mosaic panel suffix if present)
+    var groups = {};  // baseObjectName -> [ panelName, ... ]
+    for (var i = 0; i < objectDirs.length; i++) {
+        var name  = objectDirs[i];
+        var match = MOSAIC_PANEL_RE.exec(name);
+        var base  = match ? match[1] : name;
+        if (!groups[base]) groups[base] = [];
+        groups[base].push(name);
+    }
+
+    for (var base in groups) {
+        var panels   = groups[base];
+        var isMosaic = panels.length > 1 || MOSAIC_PANEL_RE.test(panels[0]);
+
+        if (isMosaic) {
+            Console.writeln("
+Mosaic detected: " + base + " (" + panels.length + " panels)");
+            // Shared processed parent: NAS_PROCESSED_ROOT/<base>/<dateStr>
+            // Each panel gets its own subfolder within that parent.
+            for (var p = 0; p < panels.length; p++) {
+                var panelName    = panels[p];
+                var processedBase = NAS_PROCESSED_ROOT + "/" + base + "/" + dateStr + "/" + panelName;
+                var result = processSession(
+                    panelName, dateStr, dateDir + "/" + panelName, processedBase);
+                if (result !== null) outputs.push(result);
+            }
+        } else {
+            var result = processSession(panels[0], dateStr, dateDir + "/" + panels[0]);
+            if (result !== null) outputs.push(result);
+        }
+    }
     return outputs;
 }
 
