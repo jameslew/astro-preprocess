@@ -17,26 +17,23 @@ Three scripts that handle the full workflow from ASIAIR capture to drizzle-stack
 ```
 Z:\
 ├── RAW\
-│   ├── 2026-02-11\
-│   │   └── NGC 2683\
-│   │       └── Light_NGC 2683_180.0s_Bin1_*.fit
-│   └── calibration\
+│   └── 2026-04-08\
+│       ├── NGC 2683\          ← lights
+│       │   └── Light_*.fit
 │       ├── darks\
-│       │   └── 2026-02-11\
-│       │       ├── 60.0s\     ← Dark_60.0s_Bin1_*.fit + master_dark_60.0s.xisf
-│       │       ├── 120.0s\    ← Dark_120.0s_Bin1_*.fit + master_dark_120.0s.xisf
-│       │       ├── 180.0s\
-│       │       ├── 300.0s\
-│       │       └── 600.0s\
-│       └── flats\
-│           └── 2026-02-11\    ← Flat_*.fit + master_flat_2026-02-11.xisf
+│       │   ├── 60.0s\         ← Dark_60.0s_*.fit + master_dark_60.0s.xisf
+│       │   ├── 120.0s\        ← Dark_120.0s_*.fit + master_dark_120.0s.xisf
+│       │   ├── 180.0s\
+│       │   ├── 300.0s\
+│       │   └── 600.0s\
+│       └── flats\             ← Flat_*.fit + master_flat_2026-04-08.xisf
 └── processed\
     └── NGC 2683\
-        └── 2026-02-11\
+        └── 2026-04-08\
             ├── debayered\    ← _d.xisf (RGB, per light sub)
             ├── calibrated\   ← _d_c.xisf (dark/flat corrected, per light sub)
             ├── registered\   ← _d_c_r.xisf + _d_c_r.xdrz (per sub)
-            ├── master\       ← integration.xisf + drizzle_NGC_2683_2026-02-11.xisf
+            ├── master\       ← integration.xisf + drizzle_NGC_2683_2026-04-08.xisf
             └── logs\         ← preprocess_<timestamp>.log (includes calibration summary)
 ```
 
@@ -104,18 +101,17 @@ This scans all of `Z:\RAW` and pre-creates the output folder structure for every
 Edit the top of `astro_preprocess.js`:
 
 ```javascript
-var NAS_RAW_ROOT       = "Z:/Raw";             // RAW input root
-var NAS_PROCESSED_ROOT = "Z:/Processed";       // Processed output root
-var NAS_CALIB_ROOT     = "Z:/Raw/calibration"; // Calibration frames root
-var BAYER_PATTERN      = 0;                    // 0=RGGB (ASI533 MC Pro)
-var DRIZZLE_SCALE      = 2.0;                  // Drizzle scale factor
+var NAS_RAW_ROOT       = "Z:/Raw";       // RAW input root
+var NAS_PROCESSED_ROOT = "Z:/Processed"; // Processed output root
+var BAYER_PATTERN      = 0;              // 0=RGGB (ASI533 MC Pro)
+var DRIZZLE_SCALE      = 2.0;            // Drizzle scale factor
+// Darks and flats are discovered automatically under NAS_RAW_ROOT/<date>/darks/ and /flats/
 ```
 
 Edit `config.ps1` to match your hardware:
 ```powershell
-$AsiairHost          = "asiair"
-$NasDriveLetter      = "Z:"
-$NasCalibrationRoot  = "Z:\RAW\calibration"
+$AsiairHost      = "asiair"
+$NasDriveLetter  = "Z:"
 ```
 
 ## Notes

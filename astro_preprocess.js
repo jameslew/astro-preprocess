@@ -26,8 +26,8 @@
 //   Z:/processed/<Object>/<Date>/calibrated/  <- calibrated light subs _d_c.xisf
 //   Z:/processed/<Object>/<Date>/registered/  <- registered subs + .xdrz
 //   Z:/processed/<Object>/<Date>/master/      <- integration + drizzle stack
-//   Z:/RAW/calibration/darks/<date>/<exp>s/   <- dark raws (copied by copy_from_asiair.ps1)
-//   Z:/RAW/calibration/flats/<date>/          <- flat raws (copied by copy_from_asiair.ps1)
+//   Z:/RAW/<date>/darks/<exp>s/              <- dark raws (copied by copy_from_asiair.ps1)
+//   Z:/RAW/<date>/flats/                     <- flat raws (copied by copy_from_asiair.ps1)
 //
 // Prerequisites:
 //   - Run copy_from_asiair.ps1 to copy RAW+calibration files and pre-create folders
@@ -40,11 +40,10 @@ var isWindows = CoreApplication.platform === "MSWINDOWS";
 // NAS paths — actual folder names on the share are "Raw" and "Processed".
 // Windows: edit the drive letter if your NAS is mapped differently.
 // macOS:   edit the volume name if your NAS mounts under a different name.
-var NAS_RAW_ROOT       = isWindows ? "Z:/Raw"                    : "/Volumes/Astro/Raw";
-var NAS_PROCESSED_ROOT = isWindows ? "Z:/Processed"              : "/Volumes/Astro/Processed";
-var NAS_CALIB_ROOT     = isWindows ? "Z:/Raw/calibration"        : "/Volumes/Astro/Raw/calibration";
-//   NAS_CALIB_ROOT/darks/<YYYY-MM-DD>/<exp>s/*.fit   <- dark raws per exposure
-//   NAS_CALIB_ROOT/flats/<YYYY-MM-DD>/*.fit          <- flat raws per date
+var NAS_RAW_ROOT       = isWindows ? "Z:/Raw"       : "/Volumes/Astro/Raw";
+var NAS_PROCESSED_ROOT = isWindows ? "Z:/Processed" : "/Volumes/Astro/Processed";
+//   Darks: NAS_RAW_ROOT/<YYYY-MM-DD>/darks/<exp>s/*.fit
+//   Flats: NAS_RAW_ROOT/<YYYY-MM-DD>/flats/*.fit
 
 // Bayer pattern for your OSC camera:
 //   0 = RGGB  (ZWO ASI533 MC Pro, most ZWO colour cameras)
@@ -753,9 +752,9 @@ function processSession(objectName, dateStr, sourceDir) {
     // ── Calibration frame discovery ───────────────────────────
     // Darks: Z:/RAW/calibration/darks/<dateStr>/<exp>s/
     // Flats: Z:/RAW/calibration/flats/<dateStr>/
-    var darkRawDir  = NAS_CALIB_ROOT + "/darks/" + dateStr +
+    var darkRawDir  = NAS_RAW_ROOT + "/" + dateStr + "/darks" +
                       (lightExp ? "/" + lightExp + "s" : "");
-    var flatRawDir  = NAS_CALIB_ROOT + "/flats/" + dateStr;
+    var flatRawDir  = NAS_RAW_ROOT + "/" + dateStr + "/flats";
 
     var darkRawFiles = fileExists(darkRawDir)  ? fitFilesIn(darkRawDir) : [];
     var flatRawFiles = fileExists(flatRawDir)  ? fitFilesIn(flatRawDir) : [];
@@ -793,7 +792,7 @@ function processSession(objectName, dateStr, sourceDir) {
 
         if (darkRawFiles.length > 0) {
             log("\n[2/7] Building master dark (" + darkRawFiles.length + " \u00d7 " + lightExp + "s)...");
-            var darkOut = NAS_CALIB_ROOT + "/darks/" + dateStr + "/" + lightExp + "s" +
+            var darkOut = NAS_RAW_ROOT + "/" + dateStr + "/darks/" + lightExp + "s" +
                           "/master_dark_" + lightExp + "s.xisf";
             masterDarkFile = buildMasterDark(darkRawFiles, darkOut);
             closeAllWindows();
@@ -807,7 +806,7 @@ function processSession(objectName, dateStr, sourceDir) {
 
         if (flatRawFiles.length > 0) {
             log("\n[3/7] Building master flat (" + flatRawFiles.length + " frames, debayer first)...");
-            var flatOut = NAS_CALIB_ROOT + "/flats/" + dateStr +
+            var flatOut = NAS_RAW_ROOT + "/" + dateStr + "/flats" +
                           "/master_flat_" + dateStr + ".xisf";
             masterFlatFile = buildMasterFlat(flatRawFiles, flatOut);
             closeAllWindows();
