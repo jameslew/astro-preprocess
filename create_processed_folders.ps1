@@ -59,8 +59,29 @@ foreach ($dateFolder in Get-ChildItem -Path $NasRawRoot -Directory) {
     }
 }
 
+# ── Pre-create calibration folders ───────────────────────────
+# Scans Z:\RAW\calibration\darks\<date>\<exp>s\ and flats\<date>\
+# so PixInsight never needs to create folders on the network share.
+$calibDarkRoot = Join-Path $NasCalibrationRoot "darks"
+$calibFlatRoot = Join-Path $NasCalibrationRoot "flats"
+
+if (Test-Path $calibDarkRoot) {
+    foreach ($dateFolder in Get-ChildItem -Path $calibDarkRoot -Directory) {
+        foreach ($expFolder in Get-ChildItem -Path $dateFolder.FullName -Directory) {
+            # Dark raws land here — no sub-structure needed beyond the exp folder itself
+            Write-Host "  Calibration dark folder exists: $($expFolder.FullName)" -ForegroundColor DarkGray
+        }
+    }
+}
+
+if (Test-Path $calibFlatRoot) {
+    foreach ($dateFolder in Get-ChildItem -Path $calibFlatRoot -Directory) {
+        Write-Host "  Calibration flat folder exists: $($dateFolder.FullName)" -ForegroundColor DarkGray
+    }
+}
+
 if ($created -eq 0) {
-    Write-Host "  All folders already exist." -ForegroundColor DarkGray
+    Write-Host "  All session folders already exist." -ForegroundColor DarkGray
 }
 
 Write-Host ""

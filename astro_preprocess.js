@@ -3,18 +3,34 @@
 // ZWO ASI533 MC Pro (RGGB) · PixInsight PJSR
 //
 // Pipeline per object/date session:
-//   1. Debayer          → _d.xisf  (RGGB/VNG, per-image)
-//   2. StarAlignment    → _d_r.xisf + _d_r.xdrz
-//   3. ImageIntegration → master/integration.xisf
-//   4. DrizzleIntegration (2x) → master/drizzle_<Object>_<Date>.xisf
+//   1. Debayer lights   → _d.xisf  (RGGB/VNG, per-image)
+//   2. Master dark      → calibration/darks/<date>/<exp>s/master_dark_<exp>s.xisf
+//   3. Master flat      → calibration/flats/<date>/master_flat_<date>.xisf
+//                         (flats debayered first, then integrated)
+//   4. ImageCalibration → calibrated/<sub>_d_c.xisf
+//   5. StarAlignment    → registered/<sub>_d_c_r.xisf + .xdrz
+//   6. ImageIntegration → master/integration.xisf
+//   7. DrizzleIntegration (2x) → master/drizzle_<Object>_<Date>.xisf
+//
+// Calibration rules:
+//   - Darks:  matched by exact exposure length, same capture date as lights.
+//             If no same-date darks found for the light exposure, calibration
+//             is skipped and a warning is written to the log.
+//   - Flats:  same capture date as lights, required. If no same-date flats
+//             exist, calibration is skipped and a warning is written to the log.
+//   - When both are absent, the pipeline proceeds without calibration and
+//             notes this clearly in the session summary section of the log.
 //
 // Output structure:
-//   Z:/processed/<Object>/<Date>/debayered/   <- debayered subs
+//   Z:/processed/<Object>/<Date>/debayered/   <- debayered light subs _d.xisf
+//   Z:/processed/<Object>/<Date>/calibrated/  <- calibrated light subs _d_c.xisf
 //   Z:/processed/<Object>/<Date>/registered/  <- registered subs + .xdrz
 //   Z:/processed/<Object>/<Date>/master/      <- integration + drizzle stack
+//   Z:/RAW/calibration/darks/<date>/<exp>s/   <- dark raws (copied by copy_from_asiair.ps1)
+//   Z:/RAW/calibration/flats/<date>/          <- flat raws (copied by copy_from_asiair.ps1)
 //
 // Prerequisites:
-//   - Run copy_from_asiair.ps1 to copy RAW files and pre-create output folders
+//   - Run copy_from_asiair.ps1 to copy RAW+calibration files and pre-create folders
 //   - PI cannot reliably create folders on network shares; PowerShell handles this
 // ============================================================
 
@@ -24,8 +40,11 @@ var isWindows = CoreApplication.platform === "MSWINDOWS";
 // NAS paths — actual folder names on the share are "Raw" and "Processed".
 // Windows: edit the drive letter if your NAS is mapped differently.
 // macOS:   edit the volume name if your NAS mounts under a different name.
-var NAS_RAW_ROOT       = isWindows ? "Z:/Raw"       : "/Volumes/Astro/Raw";
-var NAS_PROCESSED_ROOT = isWindows ? "Z:/Processed" : "/Volumes/Astro/Processed";
+var NAS_RAW_ROOT       = isWindows ? "Z:/Raw"                    : "/Volumes/Astro/Raw";
+var NAS_PROCESSED_ROOT = isWindows ? "Z:/Processed"              : "/Volumes/Astro/Processed";
+var NAS_CALIB_ROOT     = isWindows ? "Z:/Raw/calibration"        : "/Volumes/Astro/Raw/calibration";
+//   NAS_CALIB_ROOT/darks/<YYYY-MM-DD>/<exp>s/*.fit   <- dark raws per exposure
+//   NAS_CALIB_ROOT/flats/<YYYY-MM-DD>/*.fit          <- flat raws per date
 
 // Bayer pattern for your OSC camera:
 //   0 = RGGB  (ZWO ASI533 MC Pro, most ZWO colour cameras)
@@ -109,7 +128,260 @@ function logClose() {
     g_logFile = null;
 }
 
-// ── Step 1: Debayer ──────────────────────────────────────────
+// ── Calibration discovery ─────────────────────────────────────
+// Parse exposure from a Light filename: Light_..._180.0s_Bin1_...fit → "180.0"
+function parseLightExposure(filename) {
+    var m = filename.match(/_(\d+(?:\.\d+)?)s_Bin/i);
+    return m ? m[1] : null;
+}
+
+// Return the dominant exposure length (seconds) across all light frames,
+// as a string like "120.0" — needed to find the matching dark folder.
+function dominantExposure(fitFiles) {
+    var counts = {};
+    for (var i = 0; i < fitFiles.length; i++) {
+        var exp = parseLightExposure(File.extractName(fitFiles[i]));
+        if (exp) counts[exp] = (counts[exp] || 0) + 1;
+    }
+    var best = null, bestCount = 0;
+    for (var k in counts) {
+        if (counts[k] > bestCount) { best = k; bestCount = counts[k]; }
+    }
+    return best;
+}
+
+// Collect all .fit files in a directory (no recursion, no thumbnails).
+function fitFilesIn(dir) {
+    var files = [];
+    var ff = new FileFind;
+    if (!ff.begin(dir + "/*.fit")) return files;
+    do {
+        if (!ff.isDirectory) files.push(dir + "/" + ff.name);
+    } while (ff.next());
+    ff.end();
+    return files;
+}
+
+// ── Step 2: Master dark ───────────────────────────────────────
+// Integrates raw dark frames (no debayer — darks are mono CFA) into a master.
+// outputFile: full path for the master dark xisf.
+// Returns the output path on success, null if no frames available.
+function buildMasterDark(darkRawFiles, outputFile) {
+    if (!darkRawFiles || darkRawFiles.length === 0) return null;
+
+    var images = [];
+    for (var i = 0; i < darkRawFiles.length; i++)
+        images.push([true, darkRawFiles[i], "", ""]);
+
+    var II = new ImageIntegration;
+    II.images                   = images;
+    II.inputHints               = "fits-keywords normalize raw cfa use-roworder-keywords signed-is-physical";
+    II.combination              = ImageIntegration.prototype.Average;
+    II.weightMode               = ImageIntegration.prototype.NoiseEvaluation;
+    II.normalization            = ImageIntegration.prototype.NoNormalization;
+    II.rejection                = ImageIntegration.prototype.WinsorizedSigmaClip;
+    II.rejectionNormalization   = ImageIntegration.prototype.Scale;
+    II.sigmaLow                 = 4.000;
+    II.sigmaHigh                = 3.000;
+    II.winsorizationCutoff      = 5.000;
+    II.clipLow                  = true;
+    II.clipHigh                 = true;
+    II.rangeClipLow             = true;
+    II.rangeLow                 = 0.000000;
+    II.rangeClipHigh            = false;
+    II.generateRejectionMaps    = false;
+    II.generateIntegratedImage  = true;
+    II.generateDrizzleData      = false;
+    II.closePreviousImages      = false;
+    II.noGUIMessages            = true;
+    II.showImages               = true;
+    II.useFileThreads           = true;
+    II.fileThreadOverload       = 1.00;
+    II.autoMemorySize           = true;
+    II.autoMemoryLimit          = 0.75;
+    II.generateFITSKeywords     = true;
+    II.evaluateSNR              = false;
+
+    if (!II.executeGlobal())
+        throw new Error("Master dark ImageIntegration failed.");
+
+    var wins = ImageWindow.windows;
+    var saved = false;
+    for (var i = wins.length - 1; i >= 0; i--) {
+        if (!wins[i].isNull) {
+            var id = wins[i].currentView.id;
+            if (id.indexOf("rejection") < 0 && id.indexOf("slope") < 0) {
+                wins[i].saveAs(outputFile, false, false, false, false);
+                saved = true;
+                break;
+            }
+        }
+    }
+    var allWins = ImageWindow.windows;
+    for (var i = allWins.length - 1; i >= 0; i--)
+        if (!allWins[i].isNull) allWins[i].close();
+
+    if (!saved) throw new Error("Master dark: integration window not found.");
+    return outputFile;
+}
+
+// ── Step 3: Master flat ───────────────────────────────────────
+// Debayers each raw flat then integrates into a master flat.
+// Returns the output path on success, null if no frames available.
+function buildMasterFlat(flatRawFiles, outputFile) {
+    if (!flatRawFiles || flatRawFiles.length === 0) return null;
+
+    // Debayer each flat to a temp XISF in memory (we'll collect window refs)
+    var debayeredFlats = [];
+    for (var i = 0; i < flatRawFiles.length; i++) {
+        var wins = ImageWindow.open(flatRawFiles[i], "",
+            "fits-keywords normalize raw cfa use-roworder-keywords signed-is-physical");
+        if (!wins || wins.length === 0 || wins[0].isNull)
+            throw new Error("Cannot open flat: " + flatRawFiles[i]);
+
+        var db = new Debayer;
+        db.bayerPattern  = BAYER_PATTERN;
+        db.debayerMethod = 2;  // VNG
+        db.evaluateNoise = true;
+        db.executeOn(wins[0].mainView);
+
+        // Find the RGB result window and save to a temp path
+        var allWins = ImageWindow.windows;
+        var saved = false;
+        for (var j = allWins.length - 1; j >= 0; j--) {
+            if (!allWins[j].isNull && allWins[j].mainView.image.numberOfChannels === 3) {
+                var tmpPath = outputFile + "_tmp_" + i + ".xisf";
+                allWins[j].saveAs(tmpPath, false, false, false, false);
+                debayeredFlats.push(tmpPath);
+                saved = true;
+                break;
+            }
+        }
+        // Close all before next flat
+        var allWins2 = ImageWindow.windows;
+        for (var k = allWins2.length - 1; k >= 0; k--)
+            if (!allWins2[k].isNull) allWins2[k].close();
+
+        if (!saved)
+            throw new Error("Flat debayer produced no RGB window for: " + flatRawFiles[i]);
+    }
+    log("  Debayered " + debayeredFlats.length + " flat frames.");
+
+    // Integrate debayered flats
+    var images = [];
+    for (var i = 0; i < debayeredFlats.length; i++)
+        images.push([true, debayeredFlats[i], "", ""]);
+
+    var II = new ImageIntegration;
+    II.images                   = images;
+    II.inputHints               = "";
+    II.combination              = ImageIntegration.prototype.Average;
+    II.weightMode               = ImageIntegration.prototype.NoiseEvaluation;
+    II.normalization            = ImageIntegration.prototype.Multiplicative;
+    II.rejection                = ImageIntegration.prototype.WinsorizedSigmaClip;
+    II.rejectionNormalization   = ImageIntegration.prototype.Scale;
+    II.sigmaLow                 = 4.000;
+    II.sigmaHigh                = 3.000;
+    II.winsorizationCutoff      = 5.000;
+    II.clipLow                  = true;
+    II.clipHigh                 = true;
+    II.rangeClipLow             = false;
+    II.rangeClipHigh            = false;
+    II.generateRejectionMaps    = false;
+    II.generateIntegratedImage  = true;
+    II.generateDrizzleData      = false;
+    II.closePreviousImages      = false;
+    II.noGUIMessages            = true;
+    II.showImages               = true;
+    II.useFileThreads           = true;
+    II.fileThreadOverload       = 1.00;
+    II.autoMemorySize           = true;
+    II.autoMemoryLimit          = 0.75;
+    II.generateFITSKeywords     = true;
+    II.evaluateSNR              = false;
+
+    if (!II.executeGlobal())
+        throw new Error("Master flat ImageIntegration failed.");
+
+    var wins = ImageWindow.windows;
+    var saved = false;
+    for (var i = wins.length - 1; i >= 0; i--) {
+        if (!wins[i].isNull) {
+            var id = wins[i].currentView.id;
+            if (id.indexOf("rejection") < 0 && id.indexOf("slope") < 0) {
+                wins[i].saveAs(outputFile, false, false, false, false);
+                saved = true;
+                break;
+            }
+        }
+    }
+    var allWins = ImageWindow.windows;
+    for (var i = allWins.length - 1; i >= 0; i--)
+        if (!allWins[i].isNull) allWins[i].close();
+
+    // Clean up temp debayered flat files
+    for (var i = 0; i < debayeredFlats.length; i++)
+        if (fileExists(debayeredFlats[i])) File.remove(debayeredFlats[i]);
+
+    if (!saved) throw new Error("Master flat: integration window not found.");
+    return outputFile;
+}
+
+// ── Step 4: ImageCalibration ──────────────────────────────────
+// Applies master dark and/or master flat to each debayered light sub.
+// masterDarkFile and masterFlatFile may be null — IC handles partial sets.
+// Returns array of calibrated output file paths.
+function runImageCalibration(debayeredFiles, outputDir, masterDarkFile, masterFlatFile) {
+    var outputFiles = [];
+
+    for (var i = 0; i < debayeredFiles.length; i++) {
+        var inFile  = debayeredFiles[i];
+        var base    = File.extractName(inFile).replace(/\.xisf$/i, "");
+        var outFile = outputDir + "/" + base + "_c.xisf";
+
+        var IC = new ImageCalibration;
+        IC.inputFiles           = [inFile];
+        IC.inputHints           = "";
+        IC.outputDirectory      = outputDir;
+        IC.outputExtension      = ".xisf";
+        IC.outputPrefix         = "";
+        IC.outputPostfix        = "_c";
+        IC.outputSampleFormat   = ImageCalibration.prototype.f32;
+        IC.overwriteExistingFiles = true;
+        IC.onError              = ImageCalibration.prototype.Continue;
+
+        // Master dark
+        IC.masterDarkEnabled    = (masterDarkFile !== null);
+        IC.masterDarkPath       = masterDarkFile || "";
+        IC.optimizeDarks        = false;  // exact exposure match — no scaling needed
+
+        // Master flat
+        IC.masterFlatEnabled    = (masterFlatFile !== null);
+        IC.masterFlatPath       = masterFlatFile || "";
+
+        // No master bias (darks subsume bias)
+        IC.masterBiasEnabled    = false;
+        IC.masterBiasPath       = "";
+
+        IC.calibrateBias        = false;
+        IC.calibrateDark        = IC.masterDarkEnabled;
+        IC.calibrateFlat        = IC.masterFlatEnabled;
+        IC.noGUIMessages        = true;
+
+        if (!IC.executeGlobal())
+            throw new Error("ImageCalibration failed for: " + base);
+
+        if (fileExists(outFile)) {
+            outputFiles.push(outFile);
+        } else {
+            throw new Error("ImageCalibration output not found: " + outFile);
+        }
+    }
+    log("  Calibrated " + outputFiles.length + " light frames.");
+    return outputFiles;
+}
+
+
 // Opens each .fit with CFA format hints so PI reads BAYERPAT correctly.
 // executeOn() modifies the view in-place; we then find the resulting RGB
 // window by channel count and save it before closing all windows.
@@ -443,9 +715,6 @@ function processSession(objectName, dateStr, sourceDir) {
     Console.writeln("=".repeat(40));
 
     // Collect only individual light frames (Light_*.fit / Light_*.fits).
-    // ASIAIR also writes running in-camera stacks (Stacked*_*.fit) to the same
-    // folder; if those reach ImageIntegration their wildly unequal PSF weights
-    // cause nearly every frame to be rejected and the process aborts.
     var fitFiles = [];
     var fitExts = ["*.fit", "*.fits"];
     for (var ei = 0; ei < fitExts.length; ei++) {
@@ -464,17 +733,45 @@ function processSession(objectName, dateStr, sourceDir) {
     }
     log("Found " + fitFiles.length + " light frames.");
 
+    // Detect dominant light exposure for dark matching
+    var lightExp = dominantExposure(fitFiles);  // e.g. "120.0"
+
     var base          = NAS_PROCESSED_ROOT + "/" + objectName + "/" + dateStr;
     var debayeredDir  = base + "/debayered";
+    var calibratedDir = base + "/calibrated";
     var registeredDir = base + "/registered";
     var masterDir     = base + "/master";
+    var logsDir       = base + "/logs";
 
-    var logsDir = base + "/logs";
     ensureDir(debayeredDir);
+    ensureDir(calibratedDir);
     ensureDir(registeredDir);
     ensureDir(masterDir);
     ensureDir(logsDir);
     logOpen(logsDir);
+
+    // ── Calibration frame discovery ───────────────────────────
+    // Darks: Z:/RAW/calibration/darks/<dateStr>/<exp>s/
+    // Flats: Z:/RAW/calibration/flats/<dateStr>/
+    var darkRawDir  = NAS_CALIB_ROOT + "/darks/" + dateStr +
+                      (lightExp ? "/" + lightExp + "s" : "");
+    var flatRawDir  = NAS_CALIB_ROOT + "/flats/" + dateStr;
+
+    var darkRawFiles = fileExists(darkRawDir)  ? fitFilesIn(darkRawDir) : [];
+    var flatRawFiles = fileExists(flatRawDir)  ? fitFilesIn(flatRawDir) : [];
+
+    // Calibration status strings for the session summary
+    var darkStatus, flatStatus;
+    if (!lightExp) {
+        darkStatus = "\u2717 NOT USED \u2014 could not determine light exposure length";
+    } else if (darkRawFiles.length === 0) {
+        darkStatus = "\u2717 NOT USED \u2014 no same-date darks found for " + lightExp + "s in " + darkRawDir;
+    } else {
+        darkStatus = "\u2713 AVAILABLE \u2014 " + darkRawFiles.length + " \u00d7 " + lightExp + "s frames from " + darkRawDir;
+    }
+    flatStatus = flatRawFiles.length === 0
+        ? "\u2717 NOT USED \u2014 no same-date flats found in " + flatRawDir
+        : "\u2713 AVAILABLE \u2014 " + flatRawFiles.length + " frames from " + flatRawDir;
 
     var finalOutput = null;
     try {
@@ -483,24 +780,70 @@ function processSession(objectName, dateStr, sourceDir) {
         if (staleCount > 0)
             log("  Removed " + staleCount + " stale non-Light_ file(s) from previous run.");
 
-        log("\n[1/4] Debayer (RGGB/VNG)...");
+        log("\n[1/7] Debayer lights (RGGB/VNG)...");
         var dbFiles = runDebayer(fitFiles, debayeredDir);
         closeAllWindows();
 
-        log("\n[2/4] StarAlignment + drizzle data...");
-        var saResult = runStarAlignment(dbFiles, registeredDir);
+        // ── Build masters and calibrate (steps 2–4) ───────────
+        var masterDarkFile = null;
+        var masterFlatFile = null;
+        var calibFiles     = null;  // null = no calibration applied
+
+        var darkBuilt = false, flatBuilt = false;
+
+        if (darkRawFiles.length > 0) {
+            log("\n[2/7] Building master dark (" + darkRawFiles.length + " \u00d7 " + lightExp + "s)...");
+            var darkOut = NAS_CALIB_ROOT + "/darks/" + dateStr + "/" + lightExp + "s" +
+                          "/master_dark_" + lightExp + "s.xisf";
+            masterDarkFile = buildMasterDark(darkRawFiles, darkOut);
+            closeAllWindows();
+            darkBuilt = true;
+            darkStatus = "\u2713 USED \u2014 master built from " + darkRawFiles.length +
+                         " \u00d7 " + lightExp + "s frames";
+            log("  Master dark: " + darkOut);
+        } else {
+            log("\n[2/7] Master dark SKIPPED \u2014 " + darkStatus);
+        }
+
+        if (flatRawFiles.length > 0) {
+            log("\n[3/7] Building master flat (" + flatRawFiles.length + " frames, debayer first)...");
+            var flatOut = NAS_CALIB_ROOT + "/flats/" + dateStr +
+                          "/master_flat_" + dateStr + ".xisf";
+            masterFlatFile = buildMasterFlat(flatRawFiles, flatOut);
+            closeAllWindows();
+            flatBuilt = true;
+            flatStatus = "\u2713 USED \u2014 master built from " + flatRawFiles.length + " frames (debayered)";
+            log("  Master flat: " + flatOut);
+        } else {
+            log("\n[3/7] Master flat SKIPPED \u2014 " + flatStatus);
+        }
+
+        if (masterDarkFile !== null || masterFlatFile !== null) {
+            log("\n[4/7] ImageCalibration...");
+            calibFiles = runImageCalibration(dbFiles, calibratedDir, masterDarkFile, masterFlatFile);
+            closeAllWindows();
+        } else {
+            log("\n[4/7] ImageCalibration SKIPPED \u2014 no calibration masters available.");
+            log("  WARNING: Proceeding with uncalibrated light frames.");
+        }
+
+        // Use calibrated subs if available, otherwise debayered
+        var alignInputFiles = (calibFiles !== null) ? calibFiles : dbFiles;
+
+        log("\n[5/7] StarAlignment + drizzle data...");
+        var saResult = runStarAlignment(alignInputFiles, registeredDir);
         closeAllWindows();
 
         if (saResult.registered.length === 0)
             throw new Error("No registered files produced by StarAlignment.");
 
-        log("\n[3/4] ImageIntegration...");
+        log("\n[6/7] ImageIntegration...");
         runImageIntegration(saResult.registered, saResult.drizzle, masterDir);
         closeAllWindows();
 
         var validDrizzle = saResult.drizzle.filter(function(f){ return f !== ""; });
         if (validDrizzle.length > 0) {
-            log("\n[4/4] DrizzleIntegration (" + DRIZZLE_SCALE + "x, " +
+            log("\n[7/7] DrizzleIntegration (" + DRIZZLE_SCALE + "x, " +
                 validDrizzle.length + " frames)...");
             var drizzleOut = masterDir + "/drizzle_" +
                 objectName.replace(/ /g, "_") + "_" + dateStr + ".xisf";
@@ -508,16 +851,32 @@ function processSession(objectName, dateStr, sourceDir) {
             closeAllWindows();
             finalOutput = drizzleOut;
         } else {
-            log("\n[4/4] WARNING: DrizzleIntegration skipped — no .xdrz files.");
+            log("\n[7/7] WARNING: DrizzleIntegration skipped \u2014 no .xdrz files.");
             finalOutput = masterDir + "/integration.xisf";
         }
 
         log("\n\u2713 Complete [" + objectName + " / " + dateStr + "]");
 
+        // ── Calibration summary ───────────────────────────────
+        log("\n" + "-".repeat(40));
+        log("CALIBRATION SUMMARY");
+        log("-".repeat(40));
+        log("  Light frames : " + fitFiles.length + (lightExp ? " (" + lightExp + "s)" : ""));
+        log("  Darks        : " + darkStatus);
+        log("  Flats        : " + flatStatus);
+        if (masterDarkFile === null && masterFlatFile === null) {
+            log("  \u26a0 WARNING: No calibration applied \u2014 pipeline ran on uncalibrated lights.");
+        } else {
+            log("  Calibration  : APPLIED");
+        }
+        log("-".repeat(40));
+
         // Write sentinel so subsequent runs skip this session automatically.
         var sf = new File;
         sf.createForWriting(sentinelFile);
         sf.outTextLn("Processed: " + (new Date()).toISOString());
+        sf.outTextLn("Darks: " + darkStatus);
+        sf.outTextLn("Flats: " + flatStatus);
         sf.close();
 
     } catch (e) {

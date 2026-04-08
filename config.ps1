@@ -11,19 +11,23 @@
 # ============================================================
 
 # ── ASIAIR ───────────────────────────────────────────────────
-$AsiairHost      = "asiair"                 # Hostname or IP address of your ASIAIR
-$AsiairSharePath = "EMMC Images\Plan\Light" # SMB share path (typically unchanged)
-$AsiairRoot      = "\\$AsiairHost\$AsiairSharePath"
+$AsiairHost           = "asiair"                        # Hostname or IP address of your ASIAIR
+$AsiairSharePath      = "EMMC Images\Plan\Light"        # SMB share path for lights (typically unchanged)
+$AsiairRoot           = "\\$AsiairHost\$AsiairSharePath"
+$AsiairAutorunRoot    = "\\$AsiairHost\EMMC Images\Autorun"  # Autorun root (darks + flats)
+$AsiairDarkRoot       = "$AsiairAutorunRoot\Dark"
+$AsiairFlatRoot       = "$AsiairAutorunRoot\Flat"
 
 # ── NAS / local storage ──────────────────────────────────────
-$NasDriveLetter   = "Z:"                        # Drive letter your NAS is mapped to
-$NasRawRoot       = "$NasDriveLetter\RAW"       # Where raw .fit/.fits files land
-$NasProcessedRoot = "$NasDriveLetter\processed" # Where processed output goes
+$NasDriveLetter      = "Z:"                              # Drive letter your NAS is mapped to
+$NasRawRoot          = "$NasDriveLetter\RAW"             # Where raw .fit/.fits files land
+$NasProcessedRoot    = "$NasDriveLetter\processed"       # Where processed output goes
+$NasCalibrationRoot  = "$NasDriveLetter\RAW\calibration" # Where darks/flats land after copy
 
 # ── Processed session subfolder names ────────────────────────
 # Subfolders created under each <Object>\<Date> session directory.
 # Must match the paths expected by astro_preprocess.js.
-$ProcessedSubDirs = @("debayered", "registered", "master", "logs")
+$ProcessedSubDirs = @("debayered", "calibrated", "registered", "master", "logs")
 
 # ── Object friendly-name mapping ─────────────────────────────
 # Maps your ASIAIR Plan name to a richer destination folder name.
