@@ -182,7 +182,9 @@ if (Test-Path $AsiairDarkRoot) {
     Write-Host "  No Autorun\Dark folder found on ASIAIR — skipping darks." -ForegroundColor DarkGray
 }
 
-Write-Host "  Darks — Copied: $darkCopied  Skipped: $darkSkipped$(if ($darkErrors -gt 0) { "  Errors: $darkErrors" })" -ForegroundColor Cyan
+$darkSummary = "  Darks — Copied: $darkCopied  Skipped: $darkSkipped"
+if ($darkErrors -gt 0) { $darkSummary += "  Errors: $darkErrors" }
+Write-Host $darkSummary -ForegroundColor Cyan
 
 # ── Copy Flats ───────────────────────────────────────────────
 # Flat filename: Flat_<ExpTime>ms_Bin<N>_<YYYYMMDD><HHMMSS>_<Alt>deg_<Seq>.fit
@@ -226,7 +228,9 @@ if (Test-Path $AsiairFlatRoot) {
     Write-Host "  No Autorun\Flat folder found on ASIAIR — skipping flats." -ForegroundColor DarkGray
 }
 
-Write-Host "  Flats — Copied: $flatCopied  Skipped: $flatSkipped$(if ($flatErrors -gt 0) { "  Errors: $flatErrors" })" -ForegroundColor Cyan
+$flatSummary = "  Flats — Copied: $flatCopied  Skipped: $flatSkipped"
+if ($flatErrors -gt 0) { $flatSummary += "  Errors: $flatErrors" }
+Write-Host $flatSummary -ForegroundColor Cyan
 Write-Host ""
 Write-Host "=======================================" -ForegroundColor Cyan
 Write-Host "  All done." -ForegroundColor Cyan
