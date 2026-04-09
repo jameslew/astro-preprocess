@@ -35,14 +35,12 @@
 // ============================================================
 
 // ── Configuration ────────────────────────────────────────────
-// NAS paths — edit these to match your setup.
-// The platform check below is a fallback; set paths directly if needed.
-var isWindows = (CoreApplication.platform === "MSWINDOWS") ||
-                (CoreApplication.platform.indexOf("WIN") >= 0) ||
-                File.directoryExists("Z:/");
+// NAS paths — edit to match your setup.
+// isWindows is kept for the ensureDir() shell command selection.
+var isWindows = true;
 
-var NAS_RAW_ROOT       = isWindows ? "Z:/Raw"       : "/Volumes/Astro/Raw";
-var NAS_PROCESSED_ROOT = isWindows ? "Z:/Processed" : "/Volumes/Astro/Processed";
+var NAS_RAW_ROOT       = "Z:/Raw";
+var NAS_PROCESSED_ROOT = "Z:/Processed";
 //   Darks: NAS_RAW_ROOT/<YYYY-MM-DD>/darks/<exp>s/Dark_*.fit
 //   Flats: NAS_RAW_ROOT/<YYYY-MM-DD>/flats/Flat_*.fit
 
