@@ -994,12 +994,16 @@ function processSession(objectName, dateStr, sourceDir, processedBase) {
 
           if (darkRawFiles.length > 0) {
             var darkCacheKey = darkResult.date + "/" + lightExp + "s";
+            var darkOut = darkResult.dir + "/master_dark_" + lightExp + "s.xisf";
             if (g_masterDarkCache.hasOwnProperty(darkCacheKey)) {
                 masterDarkFile = g_masterDarkCache[darkCacheKey];
                 log("\n[2/7] Master dark reused from this run: " + masterDarkFile);
+            } else if (fileExists(darkOut)) {
+                masterDarkFile = darkOut;
+                g_masterDarkCache[darkCacheKey] = masterDarkFile;
+                log("\n[2/7] Master dark already exists, skipping rebuild: " + darkOut);
             } else {
                 log("\n[2/7] Building master dark (" + darkRawFiles.length + " \u00d7 " + lightExp + "s)...");
-                var darkOut = darkResult.dir + "/master_dark_" + lightExp + "s.xisf";
                 masterDarkFile = buildMasterDark(darkRawFiles, darkOut);
                 closeAllWindows();
                 g_masterDarkCache[darkCacheKey] = masterDarkFile;
@@ -1013,12 +1017,16 @@ function processSession(objectName, dateStr, sourceDir, processedBase) {
 
         if (flatRawFiles.length > 0) {
             var flatCacheKey = flatResult.date;
+            var flatOut = flatResult.dir + "/master_flat_" + flatResult.date + ".xisf";
             if (g_masterFlatCache.hasOwnProperty(flatCacheKey)) {
                 masterFlatFile = g_masterFlatCache[flatCacheKey];
                 log("\n[3/7] Master flat reused from this run: " + masterFlatFile);
+            } else if (fileExists(flatOut)) {
+                masterFlatFile = flatOut;
+                g_masterFlatCache[flatCacheKey] = masterFlatFile;
+                log("\n[3/7] Master flat already exists, skipping rebuild: " + flatOut);
             } else {
                 log("\n[3/7] Building master flat (" + flatRawFiles.length + " frames, debayer first)...");
-                var flatOut = flatResult.dir + "/master_flat_" + flatResult.date + ".xisf";
                 masterFlatFile = buildMasterFlat(flatRawFiles, flatOut);
                 closeAllWindows();
                 g_masterFlatCache[flatCacheKey] = masterFlatFile;
