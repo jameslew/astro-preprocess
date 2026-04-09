@@ -59,6 +59,12 @@ var DRIZZLE_SCALE = 2.0;
 // when looking for matching darks or flats. Covers the common case of
 // capturing calibration frames the morning after an imaging session.
 var CALIB_DATE_TOLERANCE_DAYS = 1;
+
+// Per-run master caches — keyed by "<calibDate>/<exp>s" for darks,
+// "<calibDate>" for flats. Avoids rebuilding masters when multiple
+// sessions on the same night share the same calibration frames.
+var g_masterDarkCache = {};  // key: "<date>/<exp>s"  -> path
+var g_masterFlatCache = {};  // key: "<date>"          -> path
 // ─────────────────────────────────────────────────────────────
 
 // Mosaic panel suffix pattern: objectName ends with _<row>-<col>
@@ -970,27 +976,40 @@ function processSession(objectName, dateStr, sourceDir, processedBase) {
 
         var darkBuilt = false, flatBuilt = false;
 
-        if (darkRawFiles.length > 0) {
-            log("\n[2/7] Building master dark (" + darkRawFiles.length + " \u00d7 " + lightExp + "s)...");
-            var darkOut = darkResult.dir + "/master_dark_" + lightExp + "s.xisf";
-            masterDarkFile = buildMasterDark(darkRawFiles, darkOut);
-            closeAllWindows();
+          if (darkRawFiles.length > 0) {
+            var darkCacheKey = darkResult.date + "/" + lightExp + "s";
+            if (g_masterDarkCache.hasOwnProperty(darkCacheKey)) {
+                masterDarkFile = g_masterDarkCache[darkCacheKey];
+                log("\n[2/7] Master dark reused from this run: " + masterDarkFile);
+            } else {
+                log("\n[2/7] Building master dark (" + darkRawFiles.length + " \u00d7 " + lightExp + "s)...");
+                var darkOut = darkResult.dir + "/master_dark_" + lightExp + "s.xisf";
+                masterDarkFile = buildMasterDark(darkRawFiles, darkOut);
+                closeAllWindows();
+                g_masterDarkCache[darkCacheKey] = masterDarkFile;
+                log("  Master dark: " + darkOut);
+            }
             darkBuilt = true;
-            darkStatus = "\u2713 USED \u2014 master built from " + darkRawFiles.length +
-                         " \u00d7 " + lightExp + "s frames";
-            log("  Master dark: " + darkOut);
+            darkStatus = "\u2713 USED \u2014 " + darkRawFiles.length + " \u00d7 " + lightExp + "s frames";
         } else {
             log("\n[2/7] Master dark SKIPPED \u2014 " + darkStatus);
         }
 
         if (flatRawFiles.length > 0) {
-            log("\n[3/7] Building master flat (" + flatRawFiles.length + " frames, debayer first)...");
-            var flatOut = flatResult.dir + "/master_flat_" + flatResult.date + ".xisf";
-            masterFlatFile = buildMasterFlat(flatRawFiles, flatOut);
-            closeAllWindows();
+            var flatCacheKey = flatResult.date;
+            if (g_masterFlatCache.hasOwnProperty(flatCacheKey)) {
+                masterFlatFile = g_masterFlatCache[flatCacheKey];
+                log("\n[3/7] Master flat reused from this run: " + masterFlatFile);
+            } else {
+                log("\n[3/7] Building master flat (" + flatRawFiles.length + " frames, debayer first)...");
+                var flatOut = flatResult.dir + "/master_flat_" + flatResult.date + ".xisf";
+                masterFlatFile = buildMasterFlat(flatRawFiles, flatOut);
+                closeAllWindows();
+                g_masterFlatCache[flatCacheKey] = masterFlatFile;
+                log("  Master flat: " + flatOut);
+            }
             flatBuilt = true;
-            flatStatus = "\u2713 USED \u2014 master built from " + flatRawFiles.length + " frames (debayered)";
-            log("  Master flat: " + flatOut);
+            flatStatus = "\u2713 USED \u2014 " + flatRawFiles.length + " frames (debayered)";
         } else {
             log("\n[3/7] Master flat SKIPPED \u2014 " + flatStatus);
         }
