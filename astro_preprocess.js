@@ -65,6 +65,115 @@ var CALIB_DATE_TOLERANCE_DAYS = 1;
 // e.g. "NGC 4884_1-2" -> base "NGC 4884", panel "1-2"
 var MOSAIC_PANEL_RE = /^(.+)_(\d+-\d+)$/;
 
+// Friendly name mapping — must match config.ps1 $FriendlyNames exactly.
+// Used to resolve the correct processed output folder name.
+var FRIENDLY_NAMES = {
+    // Messier
+    "M 1":   "M 1 - Crab Nebula",
+    "M 6":   "M 6 - Butterfly Cluster",
+    "M 7":   "M 7 - Ptolemy Cluster",
+    "M 8":   "M 8 - Lagoon Nebula",
+    "M 11":  "M 11 - Wild Duck Cluster",
+    "M 13":  "M 13 - Hercules Globular Cluster",
+    "M 16":  "M 16 - Eagle Nebula",
+    "M 17":  "M 17 - Omega Nebula",
+    "M 20":  "M 20 - Trifid Nebula",
+    "M 22":  "M 22 - Sagittarius Cluster",
+    "M 24":  "M 24 - Sagittarius Star Cloud",
+    "M 27":  "M 27 - Dumbbell Nebula",
+    "M 31":  "M 31 - Andromeda Galaxy",
+    "M 33":  "M 33 - Triangulum Galaxy",
+    "M 35":  "M 35 - Shoe-Buckle Cluster",
+    "M 36":  "M 36 - Pinwheel Cluster",
+    "M 37":  "M 37 - Salt and Pepper Cluster",
+    "M 38":  "M 38 - Starfish Cluster",
+    "M 42":  "M 42 - Orion Nebula",
+    "M 43":  "M 43 - De Mairans Nebula",
+    "M 44":  "M 44 - Beehive Cluster",
+    "M 45":  "M 45 - Pleiades",
+    "M 51":  "M 51 - Whirlpool Galaxy",
+    "M 57":  "M 57 - Ring Nebula",
+    "M 63":  "M 63 - Sunflower Galaxy",
+    "M 64":  "M 64 - Black Eye Galaxy",
+    "M 74":  "M 74 - Phantom Galaxy",
+    "M 76":  "M 76 - Little Dumbbell Nebula",
+    "M 81":  "M 81 - Bodes Galaxy",
+    "M 82":  "M 82 - Cigar Galaxy",
+    "M 83":  "M 83 - Southern Pinwheel Galaxy",
+    "M 87":  "M 87 - Virgo A",
+    "M 92":  "M 92 - Great Hercules Cluster",
+    "M 97":  "M 97 - Owl Nebula",
+    "M 99":  "M 99 - Coma Pinwheel",
+    "M 101": "M 101 - Pinwheel Galaxy",
+    "M 104": "M 104 - Sombrero Galaxy",
+    "M 106": "M 106 - Cosmic Muffin",
+    "M 108": "M 108 - Surfboard Galaxy",
+    // NGC
+    "NGC 104":  "NGC 104 - 47 Tucanae",
+    "NGC 253":  "NGC 253 - Sculptor Galaxy",
+    "NGC 281":  "NGC 281 - Pacman Nebula",
+    "NGC 869":  "NGC 869 - Double Cluster",
+    "NGC 884":  "NGC 884 - Double Cluster",
+    "NGC 1499": "NGC 1499 - California Nebula",
+    "NGC 1579": "NGC 1579 - Trifid of the North",
+    "NGC 1977": "NGC 1977 - Running Man Nebula",
+    "NGC 2024": "NGC 2024 - Flame Nebula",
+    "NGC 2174": "NGC 2174 - Monkey Head Nebula",
+    "NGC 2237": "NGC 2237 - Rosette Nebula",
+    "NGC 2244": "NGC 2244 - Rosette Cluster",
+    "NGC 2264": "NGC 2264 - Cone Nebula",
+    "NGC 2359": "NGC 2359 - Thors Helmet",
+    "NGC 2392": "NGC 2392 - Eskimo Nebula",
+    "NGC 2683": "NGC 2683 - UFO Galaxy",
+    "NGC 3372": "NGC 3372 - Eta Carinae Nebula",
+    "NGC 4565": "NGC 4565 - Needle Galaxy",
+    "NGC 4631": "NGC 4631 - Whale Galaxy",
+    "NGC 5139": "NGC 5139 - Omega Centauri",
+    "NGC 5982": "NGC 5982 - Draco Triplet",
+    "NGC 6188": "NGC 6188 - Fighting Dragons of Ara",
+    "NGC 6302": "NGC 6302 - Bug Nebula",
+    "NGC 6826": "NGC 6826 - Blinking Planetary",
+    "NGC 6946": "NGC 6946 - Fireworks Galaxy",
+    "NGC 6960": "NGC 6960 - Western Veil Nebula",
+    "NGC 6992": "NGC 6992 - Eastern Veil Nebula",
+    "NGC 7000": "NGC 7000 - North America Nebula",
+    "NGC 7023": "NGC 7023 - Iris Nebula",
+    "NGC 7293": "NGC 7293 - Helix Nebula",
+    "NGC 7380": "NGC 7380 - Wizard Nebula",
+    "NGC 7635": "NGC 7635 - Bubble Nebula",
+    "NGC 7662": "NGC 7662 - Blue Snowball",
+    "NGC 7789": "NGC 7789 - Carolines Rose",
+    // IC
+    "IC 405":  "IC 405 - Flaming Star Nebula",
+    "IC 410":  "IC 410 - Tadpoles Nebula",
+    "IC 417":  "IC 417 - Spider Nebula",
+    "IC 434":  "IC 434 - Horsehead Nebula",
+    "IC 443":  "IC 443 - Jellyfish Nebula",
+    "IC 1318": "IC 1318 - Sadr Region",
+    "IC 1396": "IC 1396 - Elephants Trunk Nebula",
+    "IC 1795": "IC 1795 - Fish Head Nebula",
+    "IC 1805": "IC 1805 - Heart Nebula",
+    "IC 1848": "IC 1848 - Soul Nebula",
+    "IC 2118": "IC 2118 - Witch Head Nebula",
+    "IC 2175": "IC 2175 - Monkey Head Nebula",
+    "IC 2177": "IC 2177 - Seagull Nebula",
+    "IC 5070": "IC 5070 - Pelican Nebula",
+    "IC 5146": "IC 5146 - Cocoon Nebula"
+};
+
+// Resolve friendly name for an object, stripping mosaic panel suffix first.
+// Returns the friendly name if mapped, otherwise the original name.
+// Sanitizes by removing apostrophes and unsafe chars to match PS behavior.
+function friendlyName(rawName) {
+    var m = MOSAIC_PANEL_RE.exec(rawName);
+    var base   = m ? m[1] : rawName;
+    var suffix = m ? "_" + m[2] : "";
+    var mapped = FRIENDLY_NAMES.hasOwnProperty(base) ? FRIENDLY_NAMES[base] : base;
+    // Strip unsafe chars (matches Sanitize-Name in config.ps1)
+    mapped = mapped.replace(/['\/:\*\?"<>|]/g, "").replace(/\s{2,}/g, " ").replace(/^\s+|\s+$/g, "");
+    return mapped + suffix;
+}
+
 function fileExists(p) { return File.exists(p); }
 
 function ensureDir(p) {
@@ -778,7 +887,7 @@ function processSession(objectName, dateStr, sourceDir, processedBase) {
     // Detect dominant light exposure for dark matching
     var lightExp = dominantExposure(fitFiles);  // e.g. "120.0"
 
-    var base          = processedBase || (NAS_PROCESSED_ROOT + "/" + objectName + "/" + dateStr);
+    var base          = processedBase || (NAS_PROCESSED_ROOT + "/" + friendlyName(objectName) + "/" + dateStr);
     var debayeredDir  = base + "/debayered";
     var calibratedDir = base + "/calibrated";
     var registeredDir = base + "/registered";
@@ -975,7 +1084,7 @@ function processDateDir(dateDir, dateStr) {
             // Each panel gets its own subfolder within that parent.
             for (var p = 0; p < panels.length; p++) {
                 var panelName    = panels[p];
-                var processedBase = NAS_PROCESSED_ROOT + "/" + base + "/" + dateStr + "/" + panelName;
+                var processedBase = NAS_PROCESSED_ROOT + "/" + friendlyName(base) + "/" + dateStr + "/" + panelName;
                 var result = processSession(
                     panelName, dateStr, dateDir + "/" + panelName, processedBase);
                 if (result !== null) outputs.push(result);
