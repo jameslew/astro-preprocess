@@ -511,10 +511,10 @@ function runImageCalibration(debayeredFiles, outputDir, masterDarkFile, masterFl
     // Process all debayered subs in one call for efficiency.
     var IC = new ImageCalibration;
 
-    // targets format: [[enabled, path], ...]
+    // targets format: [[enabled, path, outputDir], ...]
     var inputFilesArray = [];
     for (var i = 0; i < debayeredFiles.length; i++)
-        inputFilesArray.push([true, debayeredFiles[i]]);
+        inputFilesArray.push([true, debayeredFiles[i], outputDir]);
     IC.targets                 = inputFilesArray;
     IC.inputHints              = "";
     IC.outputDirectory         = outputDir;
@@ -545,7 +545,7 @@ function runImageCalibration(debayeredFiles, outputDir, masterDarkFile, masterFl
     IC.useFileThreads          = true;
     IC.fileThreadOverload      = 1.00;
 
-    log("  IC targets count: " + IC.targets.length);
+    log("  IC targets count: " + inputFilesArray.length);
     log("  IC outputDirectory: " + IC.outputDirectory);
     log("  IC masterDarkEnabled: " + IC.masterDarkEnabled + "  path: " + IC.masterDarkPath);
     log("  IC masterFlatEnabled: " + IC.masterFlatEnabled + "  path: " + IC.masterFlatPath);
