@@ -971,8 +971,7 @@ function processDateDir(dateDir, dateStr) {
         var isMosaic = panels.length > 1 || MOSAIC_PANEL_RE.test(panels[0]);
 
         if (isMosaic) {
-            Console.writeln("
-Mosaic detected: " + base + " (" + panels.length + " panels)");
+            Console.writeln("\nMosaic detected: " + base + " (" + panels.length + " panels)");
             // Shared processed parent: NAS_PROCESSED_ROOT/<base>/<dateStr>
             // Each panel gets its own subfolder within that parent.
             for (var p = 0; p < panels.length; p++) {
