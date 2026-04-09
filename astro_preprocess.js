@@ -423,11 +423,12 @@ function buildMasterFlat(flatRawFiles, outputFile) {
     }
     log("  Debayered " + debayeredFlats.length + " flat frames.");
 
-    // Integrate debayered flats
+    // Integrate debayered flats — wrap in try/finally to ensure temp cleanup
     var images = [];
     for (var i = 0; i < debayeredFlats.length; i++)
         images.push([true, debayeredFlats[i], "", ""]);
 
+    var flatIntegrationError = null;
     var II = new ImageIntegration;
     II.images                   = images;
     II.inputHints               = "";
@@ -456,38 +457,41 @@ function buildMasterFlat(flatRawFiles, outputFile) {
     II.generateFITSKeywords     = true;
     II.evaluateSNR              = false;
 
-    if (!II.executeGlobal())
-        throw new Error("Master flat ImageIntegration failed.");
+    try {
+        if (!II.executeGlobal())
+            throw new Error("Master flat ImageIntegration failed.");
 
-    // Save to a local temp path first to avoid SMB rename failures,
-    // then copy to the NAS destination.
-    var localTmp = File.systemTempDirectory + "/master_flat_tmp.xisf";
-    var wins = ImageWindow.windows;
-    var saved = false;
-    for (var i = wins.length - 1; i >= 0; i--) {
-        if (!wins[i].isNull) {
-            var id = wins[i].currentView.id;
-            if (id.indexOf("rejection") < 0 && id.indexOf("slope") < 0) {
-                wins[i].saveAs(localTmp, false, false, false, false);
-                saved = true;
-                break;
+        // Save to a local temp path first to avoid SMB rename failures,
+        // then copy to the NAS destination.
+        var localTmp = File.systemTempDirectory + "/master_flat_tmp.xisf";
+        var wins = ImageWindow.windows;
+        var saved = false;
+        for (var i = wins.length - 1; i >= 0; i--) {
+            if (!wins[i].isNull) {
+                var id = wins[i].currentView.id;
+                if (id.indexOf("rejection") < 0 && id.indexOf("slope") < 0) {
+                    wins[i].saveAs(localTmp, false, false, false, false);
+                    saved = true;
+                    break;
+                }
             }
         }
+        var allWins = ImageWindow.windows;
+        for (var i = allWins.length - 1; i >= 0; i--)
+            if (!allWins[i].isNull) allWins[i].close();
+
+        if (!saved) throw new Error("Master flat: integration window not found.");
+
+        // Copy from local temp to NAS
+        if (fileExists(outputFile)) File.remove(outputFile);
+        File.copyFile(outputFile, localTmp);
+        File.remove(localTmp);
+
+    } finally {
+        // Always clean up temp debayered flat files regardless of success/failure
+        for (var i = 0; i < debayeredFlats.length; i++)
+            if (fileExists(debayeredFlats[i])) File.remove(debayeredFlats[i]);
     }
-    var allWins = ImageWindow.windows;
-    for (var i = allWins.length - 1; i >= 0; i--)
-        if (!allWins[i].isNull) allWins[i].close();
-
-    // Clean up temp debayered flat files
-    for (var i = 0; i < debayeredFlats.length; i++)
-        if (fileExists(debayeredFlats[i])) File.remove(debayeredFlats[i]);
-
-    if (!saved) throw new Error("Master flat: integration window not found.");
-
-    // Copy from local temp to NAS
-    if (fileExists(outputFile)) File.remove(outputFile);
-    File.copyFile(outputFile, localTmp);
-    File.remove(localTmp);
 
     return outputFile;
 }
