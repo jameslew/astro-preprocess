@@ -507,48 +507,53 @@ function buildMasterFlat(flatRawFiles, outputFile) {
 // masterDarkFile and masterFlatFile may be null — IC handles partial sets.
 // Returns array of calibrated output file paths.
 function runImageCalibration(debayeredFiles, outputDir, masterDarkFile, masterFlatFile) {
+    // ImageCalibration requires executeGlobal() with inputFiles/outputDirectory.
+    // Process all debayered subs in one call for efficiency.
+    var IC = new ImageCalibration;
+
+    IC.inputFiles              = debayeredFiles;
+    IC.inputHints              = "";
+    IC.outputDirectory         = outputDir;
+    IC.outputExtension         = ".xisf";
+    IC.outputPrefix            = "";
+    IC.outputPostfix           = "_c";
+    IC.outputSampleFormat      = ImageCalibration.prototype.f32;
+    IC.overwriteExistingFiles  = true;
+    IC.onError                 = ImageCalibration.prototype.Continue;
+
+    // Master dark
+    IC.masterDarkEnabled       = (masterDarkFile !== null);
+    IC.masterDarkPath          = masterDarkFile || "";
+    IC.optimizeDarks           = false;  // exact exposure match -- no scaling needed
+
+    // Master flat
+    IC.masterFlatEnabled       = (masterFlatFile !== null);
+    IC.masterFlatPath          = masterFlatFile || "";
+
+    // No master bias (darks subsume bias)
+    IC.masterBiasEnabled       = false;
+    IC.masterBiasPath          = "";
+
+    IC.calibrateBias           = false;
+    IC.calibrateDark           = IC.masterDarkEnabled;
+    IC.calibrateFlat           = IC.masterFlatEnabled;
+    IC.noGUIMessages           = true;
+    IC.useFileThreads          = true;
+    IC.fileThreadOverload      = 1.00;
+
+    if (!IC.executeGlobal())
+        throw new Error("ImageCalibration failed.");
+
+    // Collect output files
     var outputFiles = [];
-
     for (var i = 0; i < debayeredFiles.length; i++) {
-        var inFile  = debayeredFiles[i];
-        var base    = File.extractName(inFile).replace(/\.xisf$/i, "");
+        var base    = File.extractName(debayeredFiles[i]).replace(/\.xisf$/i, "");
         var outFile = outputDir + "/" + base + "_c.xisf";
-
-        // Open the debayered sub
-        var wins = ImageWindow.open(inFile);
-        if (!wins || wins.length === 0 || wins[0].isNull)
-            throw new Error("ImageCalibration: cannot open " + inFile);
-        var win = wins[0];
-
-        var IC = new ImageCalibration;
-
-        // Master dark
-        IC.masterDarkEnabled  = (masterDarkFile !== null);
-        IC.masterDarkPath     = masterDarkFile || "";
-        IC.optimizeDarks      = false;  // exact exposure match -- no scaling needed
-
-        // Master flat
-        IC.masterFlatEnabled  = (masterFlatFile !== null);
-        IC.masterFlatPath     = masterFlatFile || "";
-
-        // No master bias (darks subsume bias)
-        IC.masterBiasEnabled  = false;
-        IC.masterBiasPath     = "";
-
-        IC.calibrateBias      = false;
-        IC.calibrateDark      = IC.masterDarkEnabled;
-        IC.calibrateFlat      = IC.masterFlatEnabled;
-        IC.noGUIMessages      = true;
-
-        // executeOn modifies the view in-place
-        if (!IC.executeOn(win.mainView))
-            throw new Error("ImageCalibration failed for: " + base);
-
-        // Save calibrated result
-        win.saveAs(outFile, false, false, false, false);
-        win.close();
-
-        outputFiles.push(outFile);
+        if (fileExists(outFile)) {
+            outputFiles.push(outFile);
+        } else {
+            log("  WARNING: expected calibrated output not found: " + outFile);
+        }
     }
     log("  Calibrated " + outputFiles.length + " light frames.");
     return outputFiles;
