@@ -545,6 +545,13 @@ function runImageCalibration(debayeredFiles, outputDir, masterDarkFile, masterFl
     IC.useFileThreads          = true;
     IC.fileThreadOverload      = 1.00;
 
+    log("  IC inputFiles count: " + IC.inputFiles.length);
+    log("  IC outputDirectory: " + IC.outputDirectory);
+    log("  IC masterDarkEnabled: " + IC.masterDarkEnabled + "  path: " + IC.masterDarkPath);
+    log("  IC masterFlatEnabled: " + IC.masterFlatEnabled + "  path: " + IC.masterFlatPath);
+    if (IC.inputFiles.length === 0)
+        throw new Error("ImageCalibration: inputFiles is empty — nothing to calibrate.");
+
     if (!IC.executeGlobal())
         throw new Error("ImageCalibration failed.");
 
