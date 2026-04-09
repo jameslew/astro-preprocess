@@ -162,3 +162,75 @@ Verify no incorrectly-structured folders remain from earlier pipeline runs (flat
 
 **8. Rotate GitHub token**
 Token used during development sessions should be rotated at https://github.com/settings/tokens if not already done.
+
+## WBPP Reference: ImageCalibration call for lights (from WBPP.log)
+
+When fixing calibration order, use these exact WBPP-proven IC settings for lights (raw CFA):
+
+```javascript
+// Key differences from our current implementation:
+// 1. enableCFA = true (raw CFA input, not debayered)
+// 2. inputHints includes "raw cfa" flags
+// 3. pedestalMode = Keyword (not Literal)
+// 4. darkCFADetectionMode = DetectCFA
+// 5. separateCFAFlatScalingFactors = true for lights (false for flats)
+// 6. evaluateNoise = true, evaluateSignal = true for lights
+// 7. outputHints specified explicitly
+
+IC.enableCFA = true;
+IC.cfaPattern = ImageCalibration.prototype.Auto;
+IC.inputHints = "fits-keywords normalize only-first-image raw cfa use-roworder-keywords signed-is-physical";
+IC.outputHints = "properties fits-keywords no-compress-data block-alignment 4096 max-inline-block-size 3072 no-embedded-data no-resolution ";
+IC.pedestal = 0;
+IC.pedestalMode = ImageCalibration.prototype.Keyword;
+IC.pedestalKeyword = "";
+IC.masterBiasEnabled = false;
+IC.masterDarkEnabled = true;   // set path to master dark
+IC.masterFlatEnabled = true;   // set path to master flat
+IC.calibrateBias = true;
+IC.calibrateDark = false;
+IC.calibrateFlat = false;
+IC.optimizeDarks = false;
+IC.darkOptimizationThreshold = 0.00000;
+IC.darkOptimizationLow = 3.0000;
+IC.darkOptimizationWindow = 0;
+IC.darkCFADetectionMode = ImageCalibration.prototype.DetectCFA;
+IC.separateCFAFlatScalingFactors = true;  // true for lights, false for flats
+IC.flatScaleClippingFactor = 0.05;
+IC.evaluateNoise = true;
+IC.noiseEvaluationAlgorithm = ImageCalibration.prototype.NoiseEvaluation_MRS;
+IC.evaluateSignal = true;
+IC.structureLayers = 5;
+IC.saturationThreshold = 1.00;
+IC.saturationRelative = false;
+IC.noiseLayers = 1;
+IC.hotPixelFilterRadius = 1;
+IC.noiseReductionFilterRadius = 0;
+IC.minStructureSize = 0;
+IC.psfType = ImageCalibration.prototype.PSFType_Moffat4;
+IC.psfGrowth = 1.00;
+IC.maxStars = 24576;
+IC.outputExtension = ".xisf";
+IC.outputPrefix = "";
+IC.outputPostfix = "_c";
+IC.outputSampleFormat = ImageCalibration.prototype.f32;
+IC.outputPedestal = 0;
+IC.outputPedestalMode = ImageCalibration.prototype.OutputPedestal_Literal;
+IC.autoPedestalLimit = 0.00010;
+IC.generateHistoryProperties = true;
+IC.generateFITSKeywords = true;
+IC.overwriteExistingFiles = false;
+IC.onError = ImageCalibration.prototype.Continue;
+IC.noGUIMessages = true;
+IC.useFileThreads = true;
+IC.fileThreadOverload = 1.00;
+IC.maxFileReadThreads = 0;
+IC.maxFileWriteThreads = 0;
+```
+
+Also note: WBPP builds a **CFA master flat** from raw flats first (also calibrated with dark),
+then uses that CFA master flat on the lights. Our pipeline should do the same:
+1. Build master flat from raw CFA flats (with dark applied) → CFA master flat
+2. Calibrate raw CFA lights with dark + CFA master flat → calibrated CFA lights  
+3. Debayer calibrated CFA lights → RGB
+4. StarAlignment → LocalNormalization → ImageIntegration → DrizzleIntegration
