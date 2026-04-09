@@ -511,7 +511,11 @@ function runImageCalibration(debayeredFiles, outputDir, masterDarkFile, masterFl
     // Process all debayered subs in one call for efficiency.
     var IC = new ImageCalibration;
 
-    IC.inputFiles              = debayeredFiles;
+    // inputFiles format: [[enabled, path], ...]
+    var inputFilesArray = [];
+    for (var i = 0; i < debayeredFiles.length; i++)
+        inputFilesArray.push([true, debayeredFiles[i]]);
+    IC.inputFiles              = inputFilesArray;
     IC.inputHints              = "";
     IC.outputDirectory         = outputDir;
     IC.outputExtension         = ".xisf";
