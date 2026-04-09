@@ -353,13 +353,15 @@ function buildMasterDark(darkRawFiles, outputFile) {
     if (!II.executeGlobal())
         throw new Error("Master dark ImageIntegration failed.");
 
+    // Save to local temp first to avoid SMB rename failures on network shares
+    var localTmp = File.systemTempDirectory + "/master_dark_tmp.xisf";
     var wins = ImageWindow.windows;
     var saved = false;
     for (var i = wins.length - 1; i >= 0; i--) {
         if (!wins[i].isNull) {
             var id = wins[i].currentView.id;
             if (id.indexOf("rejection") < 0 && id.indexOf("slope") < 0) {
-                wins[i].saveAs(outputFile, false, false, false, false);
+                wins[i].saveAs(localTmp, false, false, false, false);
                 saved = true;
                 break;
             }
@@ -370,6 +372,12 @@ function buildMasterDark(darkRawFiles, outputFile) {
         if (!allWins[i].isNull) allWins[i].close();
 
     if (!saved) throw new Error("Master dark: integration window not found.");
+
+    // Copy from local temp to NAS
+    if (fileExists(outputFile)) File.remove(outputFile);
+    File.copyFile(outputFile, localTmp);
+    File.remove(localTmp);
+
     return outputFile;
 }
 
@@ -451,13 +459,16 @@ function buildMasterFlat(flatRawFiles, outputFile) {
     if (!II.executeGlobal())
         throw new Error("Master flat ImageIntegration failed.");
 
+    // Save to a local temp path first to avoid SMB rename failures,
+    // then copy to the NAS destination.
+    var localTmp = File.systemTempDirectory + "/master_flat_tmp.xisf";
     var wins = ImageWindow.windows;
     var saved = false;
     for (var i = wins.length - 1; i >= 0; i--) {
         if (!wins[i].isNull) {
             var id = wins[i].currentView.id;
             if (id.indexOf("rejection") < 0 && id.indexOf("slope") < 0) {
-                wins[i].saveAs(outputFile, false, false, false, false);
+                wins[i].saveAs(localTmp, false, false, false, false);
                 saved = true;
                 break;
             }
@@ -472,6 +483,12 @@ function buildMasterFlat(flatRawFiles, outputFile) {
         if (fileExists(debayeredFlats[i])) File.remove(debayeredFlats[i]);
 
     if (!saved) throw new Error("Master flat: integration window not found.");
+
+    // Copy from local temp to NAS
+    if (fileExists(outputFile)) File.remove(outputFile);
+    File.copyFile(outputFile, localTmp);
+    File.remove(localTmp);
+
     return outputFile;
 }
 
