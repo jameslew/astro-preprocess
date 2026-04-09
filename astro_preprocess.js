@@ -55,6 +55,11 @@ var BAYER_PATTERN = 0;
 // Drizzle output scale factor. 2.0 produces a 2× larger final stack.
 // Requires generateDrizzleData = true in StarAlignment (already set).
 var DRIZZLE_SCALE = 2.0;
+
+// Maximum number of days to search forward/backward from session date
+// when looking for matching darks or flats. Covers the common case of
+// capturing calibration frames the morning after an imaging session.
+var CALIB_DATE_TOLERANCE_DAYS = 1;
 // ─────────────────────────────────────────────────────────────
 
 // Mosaic panel suffix pattern: objectName ends with _<row>-<col>
@@ -163,6 +168,38 @@ function fitFilesIn(dir) {
     } while (ff.next());
     ff.end();
     return files;
+}
+
+// ── Calibration date search ──────────────────────────────────
+// Returns a date string offset by `days` from the given YYYY-MM-DD string.
+function offsetDate(dateStr, days) {
+    var parts = dateStr.split("-");
+    var d = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+    d.setDate(d.getDate() + days);
+    var y = d.getFullYear();
+    var m = ("0" + (d.getMonth() + 1)).slice(-2);
+    var day = ("0" + d.getDate()).slice(-2);
+    return y + "-" + m + "-" + day;
+}
+
+// Search for a calibration directory within CALIB_DATE_TOLERANCE_DAYS of
+// sessionDate. Checks same date first, then alternates +1/-1, +2/-2, etc.
+// subPath is appended to NAS_RAW_ROOT/<date>/ — e.g. "darks/120.0s" or "flats"
+// Returns { dir, date, dayOffset } or null if not found within tolerance.
+function findCalibDir(sessionDate, subPath) {
+    for (var delta = 0; delta <= CALIB_DATE_TOLERANCE_DAYS; delta++) {
+        var offsets = delta === 0 ? [0] : [delta, -delta];
+        for (var oi = 0; oi < offsets.length; oi++) {
+            var candidateDate = offsetDate(sessionDate, offsets[oi]);
+            var candidateDir  = NAS_RAW_ROOT + "/" + candidateDate + "/" + subPath;
+            if (File.directoryExists(candidateDir)) {
+                var files = fitFilesIn(candidateDir);
+                if (files.length > 0)
+                    return { dir: candidateDir, date: candidateDate, dayOffset: offsets[oi] };
+            }
+        }
+    }
+    return null;
 }
 
 // ── Step 2: Master dark ───────────────────────────────────────
@@ -756,29 +793,38 @@ function processSession(objectName, dateStr, sourceDir, processedBase) {
     ensureDir(logsDir);
     logOpen(logsDir);
 
-    // ── Calibration frame discovery ───────────────────────────
-    // Darks: Z:/RAW/calibration/darks/<dateStr>/<exp>s/
-    // Flats: Z:/RAW/calibration/flats/<dateStr>/
-    var darkRawDir  = NAS_RAW_ROOT + "/" + dateStr + "/darks" +
-                      (lightExp ? "/" + lightExp + "s" : "");
-    var flatRawDir  = NAS_RAW_ROOT + "/" + dateStr + "/flats";
+    // ── Calibration frame discovery ───────────────────────────────────
+    // Search within CALIB_DATE_TOLERANCE_DAYS of session date.
+    // Darks: Z:/RAW/<date>/darks/<exp>s/
+    // Flats: Z:/RAW/<date>/flats/
+    var darkResult = lightExp ? findCalibDir(dateStr, "darks/" + lightExp + "s") : null;
+    var flatResult = findCalibDir(dateStr, "flats");
 
-    var darkRawFiles = fileExists(darkRawDir)  ? fitFilesIn(darkRawDir) : [];
-    var flatRawFiles = fileExists(flatRawDir)  ? fitFilesIn(flatRawDir) : [];
+    var darkRawFiles = darkResult ? fitFilesIn(darkResult.dir) : [];
+    var flatRawFiles = flatResult ? fitFilesIn(flatResult.dir) : [];
 
     // Calibration status strings for the session summary
     var darkStatus, flatStatus;
     if (!lightExp) {
         darkStatus = "\u2717 NOT USED \u2014 could not determine light exposure length";
-    } else if (darkRawFiles.length === 0) {
-        darkStatus = "\u2717 NOT USED \u2014 no same-date darks found for " + lightExp + "s in " + darkRawDir;
+    } else if (!darkResult) {
+        darkStatus = "\u2717 NOT USED \u2014 no darks found for " + lightExp +
+                     "s within \u00b1" + CALIB_DATE_TOLERANCE_DAYS + " day(s) of " + dateStr;
     } else {
-        darkStatus = "\u2713 AVAILABLE \u2014 " + darkRawFiles.length + " \u00d7 " + lightExp + "s frames from " + darkRawDir;
+        var darkOffsetNote = darkResult.dayOffset === 0 ? "same date" :
+            (darkResult.dayOffset > 0 ? "+" : "") + darkResult.dayOffset + " day(s) (" + darkResult.date + ")";
+        darkStatus = "\u2713 AVAILABLE \u2014 " + darkRawFiles.length + " \u00d7 " + lightExp +
+                     "s frames [" + darkOffsetNote + "] from " + darkResult.dir;
     }
-    flatStatus = flatRawFiles.length === 0
-        ? "\u2717 NOT USED \u2014 no same-date flats found in " + flatRawDir
-        : "\u2713 AVAILABLE \u2014 " + flatRawFiles.length + " frames from " + flatRawDir;
-
+    if (!flatResult) {
+        flatStatus = "\u2717 NOT USED \u2014 no flats found within \u00b1" +
+                     CALIB_DATE_TOLERANCE_DAYS + " day(s) of " + dateStr;
+    } else {
+        var flatOffsetNote = flatResult.dayOffset === 0 ? "same date" :
+            (flatResult.dayOffset > 0 ? "+" : "") + flatResult.dayOffset + " day(s) (" + flatResult.date + ")";
+        flatStatus = "\u2713 AVAILABLE \u2014 " + flatRawFiles.length +
+                     " frames [" + flatOffsetNote + "] from " + flatResult.dir;
+    }
     var finalOutput = null;
     try {
         // Purge any non-Light_ files left behind by earlier runs of the old script.
@@ -799,8 +845,7 @@ function processSession(objectName, dateStr, sourceDir, processedBase) {
 
         if (darkRawFiles.length > 0) {
             log("\n[2/7] Building master dark (" + darkRawFiles.length + " \u00d7 " + lightExp + "s)...");
-            var darkOut = NAS_RAW_ROOT + "/" + dateStr + "/darks/" + lightExp + "s" +
-                          "/master_dark_" + lightExp + "s.xisf";
+            var darkOut = darkResult.dir + "/master_dark_" + lightExp + "s.xisf";
             masterDarkFile = buildMasterDark(darkRawFiles, darkOut);
             closeAllWindows();
             darkBuilt = true;
@@ -813,8 +858,7 @@ function processSession(objectName, dateStr, sourceDir, processedBase) {
 
         if (flatRawFiles.length > 0) {
             log("\n[3/7] Building master flat (" + flatRawFiles.length + " frames, debayer first)...");
-            var flatOut = NAS_RAW_ROOT + "/" + dateStr + "/flats" +
-                          "/master_flat_" + dateStr + ".xisf";
+            var flatOut = flatResult.dir + "/master_flat_" + flatResult.date + ".xisf";
             masterFlatFile = buildMasterFlat(flatRawFiles, flatOut);
             closeAllWindows();
             flatBuilt = true;
