@@ -487,43 +487,41 @@ function runImageCalibration(debayeredFiles, outputDir, masterDarkFile, masterFl
         var base    = File.extractName(inFile).replace(/\.xisf$/i, "");
         var outFile = outputDir + "/" + base + "_c.xisf";
 
+        // Open the debayered sub
+        var wins = ImageWindow.open(inFile);
+        if (!wins || wins.length === 0 || wins[0].isNull)
+            throw new Error("ImageCalibration: cannot open " + inFile);
+        var win = wins[0];
+
         var IC = new ImageCalibration;
-        IC.inputFiles           = [inFile];
-        IC.inputHints           = "";
-        IC.outputDirectory      = outputDir;
-        IC.outputExtension      = ".xisf";
-        IC.outputPrefix         = "";
-        IC.outputPostfix        = "_c";
-        IC.outputSampleFormat   = ImageCalibration.prototype.f32;
-        IC.overwriteExistingFiles = true;
-        IC.onError              = ImageCalibration.prototype.Continue;
 
         // Master dark
-        IC.masterDarkEnabled    = (masterDarkFile !== null);
-        IC.masterDarkPath       = masterDarkFile || "";
-        IC.optimizeDarks        = false;  // exact exposure match — no scaling needed
+        IC.masterDarkEnabled  = (masterDarkFile !== null);
+        IC.masterDarkPath     = masterDarkFile || "";
+        IC.optimizeDarks      = false;  // exact exposure match -- no scaling needed
 
         // Master flat
-        IC.masterFlatEnabled    = (masterFlatFile !== null);
-        IC.masterFlatPath       = masterFlatFile || "";
+        IC.masterFlatEnabled  = (masterFlatFile !== null);
+        IC.masterFlatPath     = masterFlatFile || "";
 
         // No master bias (darks subsume bias)
-        IC.masterBiasEnabled    = false;
-        IC.masterBiasPath       = "";
+        IC.masterBiasEnabled  = false;
+        IC.masterBiasPath     = "";
 
-        IC.calibrateBias        = false;
-        IC.calibrateDark        = IC.masterDarkEnabled;
-        IC.calibrateFlat        = IC.masterFlatEnabled;
-        IC.noGUIMessages        = true;
+        IC.calibrateBias      = false;
+        IC.calibrateDark      = IC.masterDarkEnabled;
+        IC.calibrateFlat      = IC.masterFlatEnabled;
+        IC.noGUIMessages      = true;
 
-        if (!IC.executeGlobal())
+        // executeOn modifies the view in-place
+        if (!IC.executeOn(win.mainView))
             throw new Error("ImageCalibration failed for: " + base);
 
-        if (fileExists(outFile)) {
-            outputFiles.push(outFile);
-        } else {
-            throw new Error("ImageCalibration output not found: " + outFile);
-        }
+        // Save calibrated result
+        win.saveAs(outFile, false, false, false, false);
+        win.close();
+
+        outputFiles.push(outFile);
     }
     log("  Calibrated " + outputFiles.length + " light frames.");
     return outputFiles;
