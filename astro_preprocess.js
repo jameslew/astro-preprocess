@@ -35,11 +35,12 @@
 // ============================================================
 
 // ── Configuration ────────────────────────────────────────────
-var isWindows = CoreApplication.platform === "MSWINDOWS";
+// NAS paths — edit these to match your setup.
+// The platform check below is a fallback; set paths directly if needed.
+var isWindows = (CoreApplication.platform === "MSWINDOWS") ||
+                (CoreApplication.platform.indexOf("WIN") >= 0) ||
+                File.directoryExists("Z:/");
 
-// NAS paths — actual folder names on the share are "Raw" and "Processed".
-// Windows: edit the drive letter if your NAS is mapped differently.
-// macOS:   edit the volume name if your NAS mounts under a different name.
 var NAS_RAW_ROOT       = isWindows ? "Z:/Raw"       : "/Volumes/Astro/Raw";
 var NAS_PROCESSED_ROOT = isWindows ? "Z:/Processed" : "/Volumes/Astro/Processed";
 //   Darks: NAS_RAW_ROOT/<YYYY-MM-DD>/darks/<exp>s/Dark_*.fit
