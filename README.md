@@ -128,3 +128,37 @@ $NasDriveLetter  = "Z:"
 - Mount: ZWO AM5N
 - Controller: ZWO ASIAIR Plus
 - NAS: TrueNAS (`\\truenas\astro`)
+
+## Known Issues & TODO
+
+### High Priority
+
+**1. Fix calibration order (quality impact)**
+Currently: Debayer → Calibrate → Register → Integrate → Drizzle
+Correct:   Calibrate (raw CFA) → Debayer → Register → Integrate → Drizzle
+Applying a flat to an already-debayered image is incorrect — flat correction must happen at the CFA pixel level before Bayer interpolation. This is causing a purple/green gradient in output vs WBPP reference. Fix: move `runImageCalibration()` before `runDebayer()`, set `enableCFA=true`, feed debayer the calibrated CFA output.
+
+**2. Add Local Normalization**
+WBPP applies LocalNormalization between registration and integration. This significantly improves background consistency across frames and reduces gradients. Add a `runLocalNormalization()` step between StarAlignment and ImageIntegration.
+
+### Medium Priority
+
+**3. Remove diagnostic logging**
+`IC targetFrames count`, `IC outputDirectory` etc. log lines were added to debug ImageCalibration. Remove once calibration order is fixed and stable.
+
+**4. Add debayer skip optimization**
+Step 1 (debayer) reruns every time because `_processed.txt` is only written on full pipeline success. Add per-step skip: if debayered file count matches light frame count, skip debayer. Same logic could apply to calibration step.
+
+**5. Drop shrink tuning**
+Current `dropShrink = 1.00` may contribute to drizzle pattern artifacts with low frame counts. Try `0.9` as default. Consider making this a config constant.
+
+### Low Priority
+
+**6. Add auto-crop**
+WBPP crops registered frame edges automatically post-integration. Could add a crop step after DrizzleIntegration to remove the black border artifacts from registration.
+
+**7. Cleanup old processed folders**
+Verify no incorrectly-structured folders remain from earlier pipeline runs (flat NGC 4884 panel structure, darks/flats folders in processed\, etc.).
+
+**8. Rotate GitHub token**
+Token used during development sessions should be rotated at https://github.com/settings/tokens if not already done.
