@@ -42,8 +42,8 @@ var isWindows = CoreApplication.platform === "MSWINDOWS";
 // macOS:   edit the volume name if your NAS mounts under a different name.
 var NAS_RAW_ROOT       = isWindows ? "Z:/Raw"       : "/Volumes/Astro/Raw";
 var NAS_PROCESSED_ROOT = isWindows ? "Z:/Processed" : "/Volumes/Astro/Processed";
-//   Darks: NAS_RAW_ROOT/<YYYY-MM-DD>/darks/<exp>s/*.fit
-//   Flats: NAS_RAW_ROOT/<YYYY-MM-DD>/flats/*.fit
+//   Darks: NAS_RAW_ROOT/<YYYY-MM-DD>/darks/<exp>s/Dark_*.fit
+//   Flats: NAS_RAW_ROOT/<YYYY-MM-DD>/flats/Flat_*.fit
 
 // Bayer pattern for your OSC camera:
 //   0 = RGGB  (ZWO ASI533 MC Pro, most ZWO colour cameras)
