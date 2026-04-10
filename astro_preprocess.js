@@ -8,9 +8,10 @@
 //                         (raw CFA flats integrated directly — no debayer)
 //   3. ImageCalibration → calibrated/<sub>_c.xisf  (raw CFA in, CFA out)
 //   4. Debayer          → debayered/<sub>_c_d.xisf (RGB, per-image)
-//   5. StarAlignment    → registered/<sub>_c_d_r.xisf + .xdrz
-//   6. ImageIntegration → master/integration.xisf
-//   7. DrizzleIntegration (2x) → master/drizzle_<Object>_<Date>.xisf
+//   5. StarAlignment    → registered/<sub>_c_d_r.xisf + .xdrz + .xnml
+//   6. LocalNormalization → registered/<sub>_c_d_r_n.xisf + .xnml
+//   7. ImageIntegration → master/integration.xisf (uses .xnml data)
+//   8. DrizzleIntegration (2x) → master/drizzle_<Object>_<Date>.xisf
 //
 // Calibration rules:
 //   - Darks:  matched by exact exposure length, within CALIB_DATE_TOLERANCE_DAYS.
@@ -676,6 +677,93 @@ function runDebayer(inputFiles, outputDir) {
     return outputFiles;
 }
 
+// ── Step 5: LocalNormalization ───────────────────────────────
+// Normalizes all registered frames against a reference frame.
+// referenceFile: path to the reference image (best registered frame).
+// Returns array of normalized output file paths (_n.xisf).
+function runLocalNormalization(registeredFiles, referenceFile, outputDir) {
+    if (registeredFiles.length < 2) {
+        log("  LocalNormalization skipped — fewer than 2 registered frames.");
+        return registeredFiles;
+    }
+
+    // targetItems format: [[enabled, isFile, path], ...]
+    var targetItems = [];
+    for (var i = 0; i < registeredFiles.length; i++)
+        targetItems.push([true, true, registeredFiles[i]]);
+
+    var LN = new LocalNormalization;
+    LN.referencePathOrViewId    = referenceFile;
+    LN.referenceIsView          = false;
+    LN.targetItems              = targetItems;
+    LN.inputHints               = "";
+    LN.outputHints              = "";
+    LN.scale                    = 1024;
+    LN.noScale                  = false;
+    LN.globalLocationNormalization = false;
+    LN.truncate                 = true;
+    LN.backgroundSamplingDelta  = 32;
+    LN.rejection                = true;
+    LN.referenceRejection       = false;
+    LN.lowClippingLevel         = 0.000045;
+    LN.highClippingLevel        = 0.850000;
+    LN.referenceRejectionThreshold = 3.00;
+    LN.targetRejectionThreshold = 3.20;
+    LN.hotPixelFilterRadius     = 2;
+    LN.noiseReductionFilterRadius = 0;
+    LN.modelScalingFactor       = 8;
+    LN.scaleEvaluationMethod    = LocalNormalization.prototype.ScaleEvaluationMethod_PSFSignal;
+    LN.localScaleCorrections    = false;
+    LN.psfStructureLayers       = 5;
+    LN.saturationThreshold      = 0.75;
+    LN.saturationRelative       = true;
+    LN.rejectionLimit           = 0.30;
+    LN.psfRejectionLimit        = 0.30;
+    LN.psfNoiseLayers           = 1;
+    LN.psfHotPixelFilterRadius  = 1;
+    LN.psfNoiseReductionFilterRadius = 0;
+    LN.psfMinStructureSize      = 0;
+    LN.psfMinSNR                = 40;
+    LN.psfAllowClusteredSources = true;
+    LN.psfType                  = LocalNormalization.prototype.PSFType_Auto;
+    LN.psfGrowth                = 1.00;
+    LN.psfMaxStars              = 24576;
+    LN.generateNormalizedImages = LocalNormalization.prototype.GenerateNormalizedImages_GlobalExecutionOnly;
+    LN.generateNormalizationData = true;
+    LN.generateInvalidData      = false;
+    LN.generateHistoryProperties = true;
+    LN.noGUIMessages            = true;
+    LN.autoMemoryLimit          = 0.85;
+    LN.outputDirectory          = outputDir;
+    LN.outputExtension          = ".xisf";
+    LN.outputPrefix             = "";
+    LN.outputPostfix            = "_n";
+    LN.overwriteExistingFiles   = true;
+    LN.onError                  = LocalNormalization.prototype.OnError_Continue;
+    LN.useFileThreads           = true;
+    LN.fileThreadOverload       = 1.00;
+    LN.maxFileReadThreads       = 0;
+    LN.maxFileWriteThreads      = 0;
+
+    if (!LN.executeGlobal())
+        throw new Error("LocalNormalization failed.");
+
+    // Collect normalized output files
+    var outputFiles = [];
+    for (var i = 0; i < registeredFiles.length; i++) {
+        var base    = File.extractName(registeredFiles[i]).replace(/\.xisf$/i, "");
+        var outFile = outputDir + "/" + base + "_n.xisf";
+        if (fileExists(outFile)) {
+            outputFiles.push(outFile);
+        } else {
+            log("  WARNING: LN output not found: " + outFile + " — using registered file");
+            outputFiles.push(registeredFiles[i]);
+        }
+    }
+    log("  LocalNormalization: " + outputFiles.length + " frames normalized.");
+    return outputFiles;
+}
+
 // ── Step 2: StarAlignment ────────────────────────────────────
 // SA.targets array format (from WBPP 2.9.1 log): [enabled, isFile, path]
 function runStarAlignment(inputFiles, outputDir) {
@@ -784,11 +872,13 @@ function runStarAlignment(inputFiles, outputDir) {
 // II.images format (WBPP log): [enabled, path, drizzlePath, localNormPath]
 // drizzlePath is passed so II can write LocationEstimates into the .xdrz files —
 // these are required by DrizzleIntegration in step 4.
-function runImageIntegration(registeredFiles, drizzleFiles, outputDir) {
+// normDataFiles: optional array of .xnml paths from LocalNormalization (parallel to registeredFiles)
+function runImageIntegration(registeredFiles, drizzleFiles, outputDir, normDataFiles) {
     var images = [];
     for (var i = 0; i < registeredFiles.length; i++) {
         var xdrz = (drizzleFiles && drizzleFiles[i]) ? drizzleFiles[i] : "";
-        images.push([true, registeredFiles[i], xdrz, ""]);
+        var xnml = (normDataFiles && normDataFiles[i]) ? normDataFiles[i] : "";
+        images.push([true, registeredFiles[i], xdrz, xnml]);
     }
 
     var II = new ImageIntegration;
@@ -1119,20 +1209,34 @@ function processSession(objectName, dateStr, sourceDir, processedBase) {
         var dbFiles = runDebayer(filesToDebayer, debayeredDir);
         closeAllWindows();
 
-        log("\n[5/7] StarAlignment + drizzle data...");
+        log("\n[5/8] StarAlignment + drizzle data...");
         var saResult = runStarAlignment(dbFiles, registeredDir);
         closeAllWindows();
 
         if (saResult.registered.length === 0)
             throw new Error("No registered files produced by StarAlignment.");
 
-        log("\n[6/7] ImageIntegration...");
-        runImageIntegration(saResult.registered, saResult.drizzle, masterDir);
+        log("\n[6/8] LocalNormalization...");
+        var lnFiles = runLocalNormalization(saResult.registered, saResult.registered[0], registeredDir);
+        closeAllWindows();
+
+        // Pass normalization data files (.xnml) to ImageIntegration
+        // They are written alongside the _n.xisf files with the same base name
+        var lnDataFiles = [];
+        for (var i = 0; i < lnFiles.length; i++) {
+            var xnml = lnFiles[i].replace(/_n\.xisf$/i, "_n.xnml");
+            lnDataFiles.push(fileExists(xnml) ? xnml : "");
+        }
+        var nLN = lnDataFiles.filter(function(f){ return f !== ""; }).length;
+        log("  " + nLN + " normalization data files (.xnml) found.");
+
+        log("\n[7/8] ImageIntegration...");
+        runImageIntegration(lnFiles, saResult.drizzle, masterDir, lnDataFiles);
         closeAllWindows();
 
         var validDrizzle = saResult.drizzle.filter(function(f){ return f !== ""; });
         if (validDrizzle.length > 0) {
-            log("\n[7/7] DrizzleIntegration (" + DRIZZLE_SCALE + "x, " +
+            log("\n[8/8] DrizzleIntegration (" + DRIZZLE_SCALE + "x, " +
                 validDrizzle.length + " frames)...");
             var drizzleOut = masterDir + "/drizzle_" +
                 objectName.replace(/ /g, "_") + "_" + dateStr + ".xisf";
@@ -1140,7 +1244,7 @@ function processSession(objectName, dateStr, sourceDir, processedBase) {
             closeAllWindows();
             finalOutput = drizzleOut;
         } else {
-            log("\n[7/7] WARNING: DrizzleIntegration skipped \u2014 no .xdrz files.");
+            log("\n[8/8] WARNING: DrizzleIntegration skipped \u2014 no .xdrz files.");
             finalOutput = masterDir + "/integration.xisf";
         }
 
