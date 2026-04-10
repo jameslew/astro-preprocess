@@ -133,10 +133,10 @@ $NasDriveLetter  = "Z:"
 
 ### High Priority
 
-**1. Fix calibration order (quality impact)**
-Currently: Debayer → Calibrate → Register → Integrate → Drizzle
-Correct:   Calibrate (raw CFA) → Debayer → Register → Integrate → Drizzle
-Applying a flat to an already-debayered image is incorrect — flat correction must happen at the CFA pixel level before Bayer interpolation. This is causing a purple/green gradient in output vs WBPP reference. Fix: move `runImageCalibration()` before `runDebayer()`, set `enableCFA=true`, feed debayer the calibrated CFA output.
+**1. ~~Fix calibration order~~ ✓ DONE**
+Calibration order corrected: Calibrate raw CFA → Debayer → Register → Integrate → Drizzle.
+Master flat is now built as a CFA master (no debayer). ImageCalibration runs on raw .fit files
+with enableCFA=true using WBPP-proven settings. Results confirmed visually — gradient resolved.
 
 **2. Add Local Normalization**
 WBPP applies LocalNormalization between registration and integration. This significantly improves background consistency across frames and reduces gradients. Add a `runLocalNormalization()` step between StarAlignment and ImageIntegration.
