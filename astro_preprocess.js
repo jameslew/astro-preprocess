@@ -1067,9 +1067,23 @@ function processSession(objectName, dateStr, sourceDir, processedBase) {
                 masterFlatFile = g_masterFlatCache[flatCacheKey];
                 log("\n[2/7] Master flat reused from this run: " + masterFlatFile);
             } else if (fileExists(flatOut)) {
-                masterFlatFile = flatOut;
-                g_masterFlatCache[flatCacheKey] = masterFlatFile;
-                log("\n[2/7] Master flat already exists, skipping rebuild: " + flatOut);
+                // Validate it's a CFA (1-channel) master, not an old RGB one
+                var flatWins = ImageWindow.open(flatOut);
+                var flatChannels = (flatWins && flatWins.length > 0 && !flatWins[0].isNull)
+                    ? flatWins[0].mainView.image.numberOfChannels : 0;
+                if (flatWins && flatWins.length > 0 && !flatWins[0].isNull) flatWins[0].close();
+                if (flatChannels === 3) {
+                    log("\n[2/7] Existing master flat is RGB (old format) — deleting and rebuilding as CFA...");
+                    File.remove(flatOut);
+                    masterFlatFile = buildMasterFlat(flatRawFiles, masterDarkFile, flatOut);
+                    closeAllWindows();
+                    g_masterFlatCache[flatCacheKey] = masterFlatFile;
+                    log("  Master flat (CFA): " + flatOut);
+                } else {
+                    masterFlatFile = flatOut;
+                    g_masterFlatCache[flatCacheKey] = masterFlatFile;
+                    log("\n[2/7] Master flat already exists, skipping rebuild: " + flatOut);
+                }
             } else {
                 log("\n[2/7] Building master flat (" + flatRawFiles.length + " raw CFA frames)...");
                 masterFlatFile = buildMasterFlat(flatRawFiles, masterDarkFile, flatOut);
