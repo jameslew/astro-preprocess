@@ -396,7 +396,8 @@ function buildMasterFlat(flatRawFiles, masterDarkFile, outputFile) {
     // Step A: calibrate raw flats with dark (if available) via ImageCalibration
     // This removes dark current from flats before integration.
     var flatsToIntegrate = flatRawFiles;  // use raw flats directly if no dark
-    var calibFlatDir = File.extractDirectory(outputFile) + "/flat_calib_tmp";
+    // Use local temp dir to avoid SMB folder creation issues
+    var calibFlatDir = File.systemTempDirectory + "/flat_calib_tmp";
 
     if (masterDarkFile !== null) {
         ensureDir(calibFlatDir);
