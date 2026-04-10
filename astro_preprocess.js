@@ -400,7 +400,11 @@ function buildMasterFlat(flatRawFiles, masterDarkFile, outputFile) {
     var calibFlatDir = File.systemTempDirectory + "/flat_calib_tmp";
 
     if (masterDarkFile !== null) {
-        ensureDir(calibFlatDir);
+        // Create local temp dir directly via PI file API
+        if (!File.directoryExists(calibFlatDir)) {
+            if (!File.createDirectory(calibFlatDir, true))
+                throw new Error("Cannot create temp dir: " + calibFlatDir);
+        }
         var ICF = new ImageCalibration;
         var flatTargets = [];
         for (var i = 0; i < flatRawFiles.length; i++)
