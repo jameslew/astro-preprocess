@@ -687,10 +687,10 @@ function runLocalNormalization(registeredFiles, referenceFile, outputDir) {
         return registeredFiles;
     }
 
-    // targetItems format: [[enabled, isFile, path], ...]
+    // targetItems format: [[enabled, path], ...]
     var targetItems = [];
     for (var i = 0; i < registeredFiles.length; i++)
-        targetItems.push([true, true, registeredFiles[i]]);
+        targetItems.push([true, registeredFiles[i]]);
 
     var LN = new LocalNormalization;
     LN.referencePathOrViewId    = referenceFile;
