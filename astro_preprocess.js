@@ -54,6 +54,101 @@ var BAYER_PATTERN = 0;
 // Requires generateDrizzleData = true in StarAlignment (already set).
 var DRIZZLE_SCALE = 2.0;
 
+// Path to PixInsight's ImageSolver script (AdP = Astrometry & Photometry)
+var IMAGE_SOLVER_PATH = CoreApplication.srcDirPath + "/scripts/AdP/ImageSolver.js";
+var g_imageSolverLoaded = false;
+
+// ── Image solving helper ──────────────────────────────────────
+// Convert ISO date string (YYYY-MM-DDTHH:MM:SS.sss) to Julian Date
+function isoToJulianDate(iso) {
+    var s = iso.replace(/'/g, "").trim();
+    var m = s.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(\.\d+)?/);
+    if (!m) return null;
+    var Y = parseInt(m[1]), M = parseInt(m[2]), D = parseInt(m[3]);
+    var h = parseInt(m[4]), mn = parseInt(m[5]), sc = parseFloat((m[6]||"0") + (m[7]||""));
+    // Standard JD formula
+    var A = Math.floor((14 - M) / 12);
+    var y = Y + 4800 - A;
+    var mo = M + 12 * A - 3;
+    var JDN = D + Math.floor((153 * mo + 2) / 5) + 365 * y +
+              Math.floor(y / 4) - Math.floor(y / 100) + Math.floor(y / 400) - 32045;
+    return JDN + (h - 12) / 24 + mn / 1440 + sc / 86400;
+}
+
+// Run ImageSolver on an already-open ImageWindow.
+// Skips solving if the image already has a valid astrometric solution.
+// Returns true if solved (or already solved), false on failure.
+function runImageSolver(win, drizzleScale) {
+    if (!File.exists(IMAGE_SOLVER_PATH)) {
+        log("  ImageSolver not found at: " + IMAGE_SOLVER_PATH);
+        return false;
+    }
+
+    // Load ImageSolver script once per pipeline run
+    if (!g_imageSolverLoaded) {
+        eval(File.readTextFile(IMAGE_SOLVER_PATH))
+        g_imageSolverLoaded = true;
+    }
+
+    // Check if already solved
+    var checkMeta = new ImageMetadata();
+    checkMeta.ExtractMetadata(win);
+    if (checkMeta.projection !== null && checkMeta.resolution > 0) {
+        log("  ImageSolver: solution already present (res=" +
+            (checkMeta.resolution * 3600).toFixed(3) + " arcsec/px), skipping.");
+        return true;
+    }
+
+    var solver = new ImageSolver();
+    solver.solverCfg.useActive            = false;
+    solver.solverCfg.showStars            = false;
+    solver.solverCfg.showDistortion       = false;
+    solver.solverCfg.generateErrorImg     = false;
+    solver.solverCfg.catalog              = "GaiaDR3_XPSD";
+    solver.solverCfg.autoMagnitude        = true;
+    solver.solverCfg.distortionCorrection = true;
+    solver.solverCfg.maxIterations        = 10;
+
+    // Seed metadata from FITS keywords
+    solver.metadata.width    = win.mainView.image.width;
+    solver.metadata.height   = win.mainView.image.height;
+    solver.metadata.xpixsz   = 3.76;  // ASI533 MC Pro pixel size in microns
+    solver.metadata.useFocal = false;
+    // Resolution: native arcsec/px divided by drizzle scale
+    var nativeResolution = 0.733;  // arcsec/px for ASI533 at ~1058mm FL
+    solver.metadata.resolution = (nativeResolution / (drizzleScale || 1)) / 3600;  // degrees/px
+
+    var keys = win.keywords;
+    for (var i = 0; i < keys.length; i++) {
+        var k = keys[i];
+        if (k.name === "RA")       solver.metadata.ra  = parseFloat(k.value);
+        if (k.name === "DEC")      solver.metadata.dec = parseFloat(k.value);
+        if (k.name === "DATE-OBS") {
+            var jd = isoToJulianDate(k.value);
+            if (jd) { solver.metadata.epoch = jd; solver.metadata.observationTime = jd; }
+        }
+        if (k.name === "DATE-END") {
+            var jd2 = isoToJulianDate(k.value);
+            if (jd2) solver.metadata.endTime = jd2;
+        }
+        if (k.name === "FOCALLEN" && parseFloat(k.value) > 0)
+            solver.metadata.focal = parseFloat(k.value) / (drizzleScale || 1);
+    }
+
+    log("  ImageSolver: RA=" + solver.metadata.ra.toFixed(4) +
+        " Dec=" + solver.metadata.dec.toFixed(4) +
+        " res=" + (solver.metadata.resolution * 3600).toFixed(3) + " arcsec/px");
+
+    var result = solver.SolveImage(win);
+    if (result) {
+        log("  ImageSolver: solved successfully.");
+    } else {
+        log("  WARNING: ImageSolver failed — image will not have astrometric solution.");
+    }
+    return result;
+}
+
+
 // Maximum number of days to search forward/backward from session date
 // when looking for matching darks or flats. Covers the common case of
 // capturing calibration frames the morning after an imaging session.
@@ -1243,6 +1338,18 @@ function processSession(objectName, dateStr, sourceDir, processedBase) {
             runDrizzleIntegration(saResult.drizzle, drizzleOut);
             closeAllWindows();
             finalOutput = drizzleOut;
+
+            // Plate solve the drizzle output
+            log("\n[8+] ImageSolver...");
+            var solveWins = ImageWindow.open(drizzleOut);
+            if (solveWins && solveWins.length > 0 && !solveWins[0].isNull) {
+                var solved = runImageSolver(solveWins[0], DRIZZLE_SCALE);
+                if (solved) {
+                    solveWins[0].saveAs(drizzleOut, false, false, false, false);
+                    log("  Plate solution saved to: " + drizzleOut);
+                }
+                solveWins[0].forceClose();
+            }
         } else {
             log("\n[8/8] WARNING: DrizzleIntegration skipped \u2014 no .xdrz files.");
             finalOutput = masterDir + "/integration.xisf";
