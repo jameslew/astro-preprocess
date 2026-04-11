@@ -777,11 +777,11 @@ function runStarAlignment(inputFiles, outputDir) {
     SA.hotPixelFilterRadius         = 1;
     SA.noiseReductionFilterRadius   = 0;
     SA.minStructureSize             = 0;
-    SA.sensitivity                  = 0.50;
-    SA.peakResponse                 = 0.50;
+    SA.sensitivity                  = 0.10;  // lowered from 0.50 to detect more stars
+    SA.peakResponse                 = 0.80;  // raised to prefer sharper star peaks
     SA.brightThreshold              = 3.00;
     SA.maxStarDistortion            = 0.60;
-    SA.allowClusteredSources        = false;
+    SA.allowClusteredSources        = true;  // allow stars near galaxy cores
     SA.localMaximaDetectionLimit    = 0.75;
     SA.upperLimit                   = 1.000;
     SA.invert                       = false;
@@ -811,7 +811,7 @@ function runStarAlignment(inputFiles, outputDir) {
     SA.useTriangles                 = false;
     SA.polygonSides                 = 5;
     SA.descriptorsPerStar           = 20;
-    SA.restrictToPreviews           = true;
+    SA.restrictToPreviews           = false;  // false for global execution
     SA.intersection                 = StarAlignment.prototype.MosaicOnly;
     SA.useBrightnessRelations       = false;
     SA.useScaleDifferences          = false;
