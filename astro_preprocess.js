@@ -33,6 +33,10 @@
 //   - PI cannot reliably create folders on network shares; PowerShell handles this
 // ============================================================
 
+// Load ImageSolver script (AdP = Astrometry & Photometry tools)
+// Must be #included at top level — PJSR preprocessor directive.
+#include "C:/Program Files/PixInsight/src/scripts/AdP/ImageSolver.js"
+
 // ── Configuration ────────────────────────────────────────────
 // NAS paths — edit to match your setup.
 // isWindows is kept for the ensureDir() shell command selection.
@@ -84,11 +88,8 @@ function runImageSolver(win, drizzleScale) {
         return false;
     }
 
-    // Load ImageSolver script once per pipeline run
-    if (!g_imageSolverLoaded) {
-        eval(File.readTextFile(IMAGE_SOLVER_PATH))
-        g_imageSolverLoaded = true;
-    }
+    // ImageSolver is loaded via #include at the top of the file
+    // (PJSR #include is a preprocessor directive, must be at top level)
 
     // Check if already solved
     var checkMeta = new ImageMetadata();
