@@ -1348,8 +1348,10 @@ function processSession(objectName, dateStr, sourceDir, processedBase) {
             // Plate solve the open drizzle window before closing it
             // so SPCC can use the solution on the open window.
             log("\n[8+] ImageSolver...");
+            log("  drizzleWin is " + (drizzleWin === null ? "NULL" : "open, id=" + drizzleWin.currentView.id));
             if (drizzleWin !== null && !drizzleWin.isNull) {
                 var solved = runImageSolver(drizzleWin, DRIZZLE_SCALE);
+                log("  runImageSolver returned: " + solved);
                 if (solved) {
                     log("  drizzleWin.filePath: " + drizzleWin.filePath);
                     // Save using outputHints to ensure XISF properties are written
