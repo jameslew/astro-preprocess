@@ -1339,12 +1339,9 @@ function processSession(objectName, dateStr, sourceDir, processedBase) {
             var drizzleOut = masterDir + "/drizzle_" +
                 objectName.replace(/ /g, "_") + "_" + dateStr + ".xisf";
             runDrizzleIntegration(saResult.drizzle, drizzleOut);
-            closeAllWindows();
-            finalOutput = drizzleOut;
 
-            // Plate solve the drizzle output.
-            // Find the drizzle window that DrizzleIntegration left open
-            // rather than reopening from disk — so SPCC sees the solution.
+            // Plate solve the drizzle output BEFORE closeAllWindows()
+            // so we can solve the open window directly and SPCC sees the solution.
             log("\n[8+] ImageSolver...");
             var drizzleWin = null;
             var allWinsNow = ImageWindow.windows;
@@ -1356,20 +1353,15 @@ function processSession(objectName, dateStr, sourceDir, processedBase) {
                     break;
                 }
             }
-            if (drizzleWin === null) {
-                // Fallback: reopen from disk
-                var solveWins = ImageWindow.open(drizzleOut);
-                if (solveWins && solveWins.length > 0 && !solveWins[0].isNull)
-                    drizzleWin = solveWins[0];
-            }
             if (drizzleWin !== null) {
                 var solved = runImageSolver(drizzleWin, DRIZZLE_SCALE);
                 if (solved) {
                     drizzleWin.saveAs(drizzleOut, false, false, false, false);
                     log("  Plate solution saved to: " + drizzleOut);
                 }
-                // Don't close — main loop opens it for display
             }
+            closeAllWindows();
+            finalOutput = drizzleOut;
         } else {
             log("\n[8/8] WARNING: DrizzleIntegration skipped \u2014 no .xdrz files.");
             finalOutput = masterDir + "/integration.xisf";
