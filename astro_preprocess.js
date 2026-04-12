@@ -1112,9 +1112,11 @@ function runDrizzleIntegration(drizzleFiles, outputFile) {
         throw new Error("DrizzleIntegration failed.");
 
     // DI produces two windows: the integration and a weights map.
-    // Save the main image (not the weights map) and close both.
+    // Save the main image and close the weights map.
+    // Return the main window open so caller can plate-solve it before closing.
     var wins = ImageWindow.windows;
     var saved = false;
+    var mainWin = null;
     for (var i = wins.length - 1; i >= 0; i--) {
         if (!wins[i].isNull) {
             var id = wins[i].currentView.id;
@@ -1122,12 +1124,15 @@ function runDrizzleIntegration(drizzleFiles, outputFile) {
                 wins[i].saveAs(outputFile, false, false, false, false);
                 log("  Drizzle saved: " + outputFile);
                 saved = true;
+                mainWin = wins[i];  // keep open for plate solving
+            } else {
+                wins[i].close();  // close weights map
             }
-            wins[i].close();
         }
     }
     if (!saved)
         throw new Error("DrizzleIntegration: main output window not found.");
+    return mainWin;  // caller is responsible for closing
 }
 
 // ── Session processor ────────────────────────────────────────
@@ -1338,27 +1343,18 @@ function processSession(objectName, dateStr, sourceDir, processedBase) {
                 validDrizzle.length + " frames)...");
             var drizzleOut = masterDir + "/drizzle_" +
                 objectName.replace(/ /g, "_") + "_" + dateStr + ".xisf";
-            runDrizzleIntegration(saResult.drizzle, drizzleOut);
+            var drizzleWin = runDrizzleIntegration(saResult.drizzle, drizzleOut);
 
-            // Plate solve the drizzle output BEFORE closeAllWindows()
-            // so we can solve the open window directly and SPCC sees the solution.
+            // Plate solve the open drizzle window before closing it
+            // so SPCC can use the solution on the open window.
             log("\n[8+] ImageSolver...");
-            var drizzleWin = null;
-            var allWinsNow = ImageWindow.windows;
-            for (var wi = allWinsNow.length - 1; wi >= 0; wi--) {
-                if (!allWinsNow[wi].isNull &&
-                    allWinsNow[wi].currentView.id.indexOf("drizzle") >= 0 &&
-                    allWinsNow[wi].currentView.id.indexOf("weight") < 0) {
-                    drizzleWin = allWinsNow[wi];
-                    break;
-                }
-            }
-            if (drizzleWin !== null) {
+            if (drizzleWin !== null && !drizzleWin.isNull) {
                 var solved = runImageSolver(drizzleWin, DRIZZLE_SCALE);
                 if (solved) {
                     drizzleWin.saveAs(drizzleOut, false, false, false, false);
                     log("  Plate solution saved to: " + drizzleOut);
                 }
+                // Leave open — main loop will display it
             }
             closeAllWindows();
             finalOutput = drizzleOut;
