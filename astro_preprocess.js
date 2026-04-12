@@ -1351,7 +1351,9 @@ function processSession(objectName, dateStr, sourceDir, processedBase) {
             if (drizzleWin !== null && !drizzleWin.isNull) {
                 var solved = runImageSolver(drizzleWin, DRIZZLE_SCALE);
                 if (solved) {
-                    drizzleWin.saveAs(drizzleOut, false, false, false, false);
+                    // Use save() not saveAs() to preserve all XISF properties
+                    // including the WCS astrometric solution written by ImageSolver
+                    drizzleWin.save();
                     log("  Plate solution saved to: " + drizzleOut);
                 }
                 // Leave open — main loop will display it
