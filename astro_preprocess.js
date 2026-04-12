@@ -1340,16 +1340,33 @@ function processSession(objectName, dateStr, sourceDir, processedBase) {
             closeAllWindows();
             finalOutput = drizzleOut;
 
-            // Plate solve the drizzle output
+            // Plate solve the drizzle output.
+            // Find the drizzle window that DrizzleIntegration left open
+            // rather than reopening from disk — so SPCC sees the solution.
             log("\n[8+] ImageSolver...");
-            var solveWins = ImageWindow.open(drizzleOut);
-            if (solveWins && solveWins.length > 0 && !solveWins[0].isNull) {
-                var solved = runImageSolver(solveWins[0], DRIZZLE_SCALE);
+            var drizzleWin = null;
+            var allWinsNow = ImageWindow.windows;
+            for (var wi = allWinsNow.length - 1; wi >= 0; wi--) {
+                if (!allWinsNow[wi].isNull &&
+                    allWinsNow[wi].currentView.id.indexOf("drizzle") >= 0 &&
+                    allWinsNow[wi].currentView.id.indexOf("weight") < 0) {
+                    drizzleWin = allWinsNow[wi];
+                    break;
+                }
+            }
+            if (drizzleWin === null) {
+                // Fallback: reopen from disk
+                var solveWins = ImageWindow.open(drizzleOut);
+                if (solveWins && solveWins.length > 0 && !solveWins[0].isNull)
+                    drizzleWin = solveWins[0];
+            }
+            if (drizzleWin !== null) {
+                var solved = runImageSolver(drizzleWin, DRIZZLE_SCALE);
                 if (solved) {
-                    solveWins[0].saveAs(drizzleOut, false, false, false, false);
+                    drizzleWin.saveAs(drizzleOut, false, false, false, false);
                     log("  Plate solution saved to: " + drizzleOut);
                 }
-                solveWins[0].forceClose();
+                // Don't close — main loop opens it for display
             }
         } else {
             log("\n[8/8] WARNING: DrizzleIntegration skipped \u2014 no .xdrz files.");
