@@ -1354,22 +1354,11 @@ function processSession(objectName, dateStr, sourceDir, processedBase) {
                 log("  runImageSolver returned: " + solved);
                 if (solved) {
                     log("  drizzleWin.filePath: " + drizzleWin.filePath);
-                    // Save using outputHints to ensure XISF properties are written
-                    drizzleWin.saveAs(drizzleOut,
-                        false,   // queryOptions
-                        false,   // allowMessages
-                        false,   // strict
-                        false);  // preserve (use file format defaults)
+                    // Regenerate the astrometric solution in the window before saving
+                    // This ensures the full XISF WCS properties are written
+                    drizzleWin.regenerateAstrometricSolution();
+                    drizzleWin.saveAs(drizzleOut, false, false, false, false);
                     log("  Plate solution saved to: " + drizzleOut);
-                    // Verify properties count after save
-                    var verWins = ImageWindow.open(drizzleOut);
-                    if (verWins && verWins.length > 0 && !verWins[0].isNull) {
-                        log("  Verification: " + verWins[0].keywords.length + " FITS keywords");
-                        var vMeta = new ImageMetadata();
-                        vMeta.ExtractMetadata(verWins[0]);
-                        log("  Verification: has solution = " + (vMeta.projection !== null));
-                        verWins[0].forceClose();
-                    }
                 }
                 // Leave open — main loop will display it
             }
