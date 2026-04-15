@@ -1348,24 +1348,22 @@ function processSession(objectName, dateStr, sourceDir, processedBase) {
             // Plate solve the open drizzle window before closing it
             // so SPCC can use the solution on the open window.
             log("\n[8+] ImageSolver...");
-            log("  drizzleWin is " + (drizzleWin === null ? "NULL" : "open, id=" + drizzleWin.currentView.id));
             if (drizzleWin !== null && !drizzleWin.isNull) {
                 var solved = runImageSolver(drizzleWin, DRIZZLE_SCALE);
-                log("  runImageSolver returned: " + solved);
                 if (solved) {
-                    log("  drizzleWin.filePath: " + drizzleWin.filePath);
-                    drizzleWin.regenerateAstrometricSolution();
-                    // Use strict=true to match ImageSolver's own SaveImage() method
-                    drizzleWin.saveAs(drizzleOut,
-                        false,   // queryOptions
-                        false,   // allowMessages  
-                        true,    // strict (matches ImageSolver.SaveImage)
-                        false);  // preserve
-                    log("  Plate solution saved to: " + drizzleOut);
+                    log("  Plate solution applied to open window (run DBE/SPCC now).");
+                    // Close everything except the solved drizzle window
+                    var allWC = ImageWindow.windows;
+                    for (var wci = allWC.length - 1; wci >= 0; wci--) {
+                        if (!allWC[wci].isNull && allWC[wci] !== drizzleWin)
+                            allWC[wci].close();
+                    }
+                } else {
+                    closeAllWindows();
                 }
-                // Leave open — main loop will display it
+            } else {
+                closeAllWindows();
             }
-            closeAllWindows();
             finalOutput = drizzleOut;
         } else {
             log("\n[8/8] WARNING: DrizzleIntegration skipped \u2014 no .xdrz files.");
