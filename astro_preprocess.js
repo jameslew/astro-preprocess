@@ -1354,9 +1354,9 @@ function processSession(objectName, dateStr, sourceDir, processedBase) {
                 log("  runImageSolver returned: " + solved);
                 if (solved) {
                     log("  drizzleWin.filePath: " + drizzleWin.filePath);
-                    // Regenerate the astrometric solution in the window before saving
-                    // This ensures the full XISF WCS properties are written
                     drizzleWin.regenerateAstrometricSolution();
+                    // saveAs with outputHints that explicitly include properties
+                    drizzleWin.outputHints = "properties fits-keywords";
                     drizzleWin.saveAs(drizzleOut, false, false, false, false);
                     log("  Plate solution saved to: " + drizzleOut);
                 }
