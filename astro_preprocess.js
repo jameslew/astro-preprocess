@@ -1355,9 +1355,12 @@ function processSession(objectName, dateStr, sourceDir, processedBase) {
                 if (solved) {
                     log("  drizzleWin.filePath: " + drizzleWin.filePath);
                     drizzleWin.regenerateAstrometricSolution();
-                    // saveAs with outputHints that explicitly include properties
-                    drizzleWin.outputHints = "properties fits-keywords";
-                    drizzleWin.saveAs(drizzleOut, false, false, false, false);
+                    // Use strict=true to match ImageSolver's own SaveImage() method
+                    drizzleWin.saveAs(drizzleOut,
+                        false,   // queryOptions
+                        false,   // allowMessages  
+                        true,    // strict (matches ImageSolver.SaveImage)
+                        false);  // preserve
                     log("  Plate solution saved to: " + drizzleOut);
                 }
                 // Leave open — main loop will display it
