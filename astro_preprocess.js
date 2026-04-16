@@ -38,6 +38,8 @@
 // of ImageSolver.js so it doesn't show the dialog on include.
 #define USE_SOLVER_LIBRARY
 #include <pjsr/DataType.jsh>
+#include "C:/Program Files/PixInsight/src/scripts/AdP/WCSmetadata.jsh"
+#include "C:/Program Files/PixInsight/src/scripts/AdP/AstronomicalCatalogs.jsh"
 #include "C:/Program Files/PixInsight/src/scripts/AdP/ImageSolver.js"
 
 // ── Configuration ────────────────────────────────────────────
