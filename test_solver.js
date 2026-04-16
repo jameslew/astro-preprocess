@@ -10,6 +10,13 @@ if (typeof Ext_DataType_Complex     === "undefined") var Ext_DataType_Complex   
 if (typeof Ext_DataType_StringArray === "undefined") var Ext_DataType_StringArray = 1001;
 if (typeof Ext_DataType_JSON        === "undefined") var Ext_DataType_JSON        = 1002;
 
+// StarDetector.jsh expects SETTINGS_MODULE as a runtime JS variable.
+// Use indirect eval to define it without the preprocessor substituting the name.
+var _smKey = "SETTINGS" + "_MODULE";
+if (typeof eval(_smKey) === "undefined") {
+    eval("var " + _smKey + " = 'ImageSolver'");
+}
+
 var TEST_FILE = "Z:/Processed/M 82 - Cigar Galaxy/2026-04-07/master/drizzle_M_82_2026-04-07.xisf";
 var DRIZZLE_SCALE = 2.0;
 

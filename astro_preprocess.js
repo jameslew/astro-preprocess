@@ -69,7 +69,14 @@ var g_imageSolverLoaded = false;
 if (typeof Ext_DataType_Complex     === "undefined") var Ext_DataType_Complex     = 1000;
 if (typeof Ext_DataType_StringArray === "undefined") var Ext_DataType_StringArray = 1001;
 if (typeof Ext_DataType_JSON        === "undefined") var Ext_DataType_JSON        = 1002;
-// The solver module name constants are preprocessor macros handled automatically.
+// Define solver module name as a JS variable using indirect assignment
+// so the preprocessor doesn't substitute the macro name itself.
+// StarDetector.jsh expects this to exist as a runtime JS variable.
+var _smKey = "SETTINGS" + "_MODULE";
+if (typeof eval(_smKey) === "undefined") {
+    var SETTINGS_MODULE_JS = "ImageSolver";
+    eval("var " + _smKey + " = SETTINGS_MODULE_JS");
+}
 
 // ── Image solving helper ──────────────────────────────────────
 // Convert ISO date string (YYYY-MM-DDTHH:MM:SS.sss) to Julian Date
