@@ -64,11 +64,14 @@ var DRIZZLE_SCALE = 2.0;
 var IMAGE_SOLVER_PATH = CoreApplication.srcDirPath + "/scripts/AdP/ImageSolver.js";
 var g_imageSolverLoaded = false;
 
-// Ext_DataType constants from WCSmetadata.jsh — defined as #define macros
-// but need to exist as JS variables for runtime evaluation in SolverConfiguration
+// Constants from ImageSolver.js #define macros — need JS variable definitions
+// for runtime evaluation (preprocessor macros don't persist as JS variables)
 if (typeof Ext_DataType_Complex     === "undefined") var Ext_DataType_Complex     = 1000;
 if (typeof Ext_DataType_StringArray === "undefined") var Ext_DataType_StringArray = 1001;
 if (typeof Ext_DataType_JSON        === "undefined") var Ext_DataType_JSON        = 1002;
+// SETTINGS_MODULE and SETTINGS_MODULE_SCRIPT are used by SolverConfiguration
+if (typeof SETTINGS_MODULE          === "undefined") var SETTINGS_MODULE          = "SOLVER";
+if (typeof SETTINGS_MODULE_SCRIPT   === "undefined") var SETTINGS_MODULE_SCRIPT   = "ImageSolver";
 
 // ── Image solving helper ──────────────────────────────────────
 // Convert ISO date string (YYYY-MM-DDTHH:MM:SS.sss) to Julian Date
