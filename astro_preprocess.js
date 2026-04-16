@@ -37,9 +37,6 @@
 // #define USE_SOLVER_LIBRARY suppresses the main() call at the bottom
 // of ImageSolver.js so it doesn't show the dialog on include.
 #define USE_SOLVER_LIBRARY
-#include <pjsr/DataType.jsh>
-#include "C:/Program Files/PixInsight/src/scripts/AdP/WCSmetadata.jsh"
-#include "C:/Program Files/PixInsight/src/scripts/AdP/AstronomicalCatalogs.jsh"
 #include "C:/Program Files/PixInsight/src/scripts/AdP/ImageSolver.js"
 
 // ── Configuration ────────────────────────────────────────────
@@ -66,6 +63,12 @@ var DRIZZLE_SCALE = 2.0;
 // Path to PixInsight's ImageSolver script (AdP = Astrometry & Photometry)
 var IMAGE_SOLVER_PATH = CoreApplication.srcDirPath + "/scripts/AdP/ImageSolver.js";
 var g_imageSolverLoaded = false;
+
+// Ext_DataType constants from WCSmetadata.jsh — defined as #define macros
+// but need to exist as JS variables for runtime evaluation in SolverConfiguration
+if (typeof Ext_DataType_Complex     === "undefined") var Ext_DataType_Complex     = 1000;
+if (typeof Ext_DataType_StringArray === "undefined") var Ext_DataType_StringArray = 1001;
+if (typeof Ext_DataType_JSON        === "undefined") var Ext_DataType_JSON        = 1002;
 
 // ── Image solving helper ──────────────────────────────────────
 // Convert ISO date string (YYYY-MM-DDTHH:MM:SS.sss) to Julian Date
