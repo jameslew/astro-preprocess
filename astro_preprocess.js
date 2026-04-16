@@ -69,8 +69,7 @@ var g_imageSolverLoaded = false;
 if (typeof Ext_DataType_Complex     === "undefined") var Ext_DataType_Complex     = 1000;
 if (typeof Ext_DataType_StringArray === "undefined") var Ext_DataType_StringArray = 1001;
 if (typeof Ext_DataType_JSON        === "undefined") var Ext_DataType_JSON        = 1002;
-// SETTINGS_MODULE and SETTINGS_MODULE_SCRIPT are #define macros in ImageSolver.js
-// They are substituted by the preprocessor so no JS variable definition needed.
+// The solver module name constants are preprocessor macros handled automatically.
 
 // ── Image solving helper ──────────────────────────────────────
 // Convert ISO date string (YYYY-MM-DDTHH:MM:SS.sss) to Julian Date
