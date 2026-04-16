@@ -93,11 +93,12 @@ function runImageSolver(win, drizzleScale) {
     // ImageSolver is loaded via #include at the top of the file
     // (PJSR #include is a preprocessor directive, must be at top level)
 
-    // Check if already solved
+    // Check if already fully plate-solved (needs ref_I_G transformation matrix,
+    // not just RA/DEC pointing coords from ASIAIR)
     var checkMeta = new ImageMetadata();
     checkMeta.ExtractMetadata(win);
-    if (checkMeta.projection !== null && checkMeta.resolution > 0) {
-        log("  ImageSolver: solution already present (res=" +
+    if (checkMeta.ref_I_G !== null && checkMeta.resolution > 0) {
+        log("  ImageSolver: full plate solution already present (res=" +
             (checkMeta.resolution * 3600).toFixed(3) + " arcsec/px), skipping.");
         return true;
     }
