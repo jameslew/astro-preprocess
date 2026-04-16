@@ -1359,7 +1359,10 @@ function processSession(objectName, dateStr, sourceDir, processedBase) {
             if (drizzleWin !== null && !drizzleWin.isNull) {
                 var solved = runImageSolver(drizzleWin, DRIZZLE_SCALE);
                 if (solved) {
-                    log("  Plate solution applied to open window (run DBE/SPCC now).");
+                    log("  Plate solution applied — saving to disk...");
+                    // Save with preserve=true to retain XISF properties including WCS
+                    drizzleWin.saveAs(drizzleOut, false, false, false, true);
+                    log("  Plate solution saved to: " + drizzleOut);
                     // Close everything except the solved drizzle window
                     var allWC = ImageWindow.windows;
                     for (var wci = allWC.length - 1; wci >= 0; wci--) {
