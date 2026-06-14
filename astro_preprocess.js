@@ -36,16 +36,31 @@
 // Load ImageSolver script (AdP = Astrometry & Photometry tools)
 // #define USE_SOLVER_LIBRARY suppresses the main() call at the bottom
 // of ImageSolver.js so it doesn't show the dialog on include.
+// Relative include resolves against THIS file's directory, so it is
+// cross-platform PROVIDED astro_preprocess.js lives in PixInsight's own
+// scripts dir (.../PixInsight/src/scripts/) alongside the AdP folder.
 #define USE_SOLVER_LIBRARY
-#include "C:/Program Files/PixInsight/src/scripts/AdP/ImageSolver.js"
+#include "AdP/ImageSolver.js"
 
 // ── Configuration ────────────────────────────────────────────
-// NAS paths — edit to match your setup.
-// isWindows is kept for the ensureDir() shell command selection.
-var isWindows = true;
+// Platform is auto-detected from PixInsight's install path:
+//   Windows src dir is like "C:/..."  -> drive-letter colon at index 1
+//   macOS/Linux src dir is like "/Applications/..." -> leading slash
+// isWindows drives both the NAS roots below and the ensureDir() shell call.
+var isWindows = (CoreApplication.srcDirPath.charAt(1) === ":");
 
-var NAS_RAW_ROOT       = "Z:/Raw";
-var NAS_PROCESSED_ROOT = "Z:/Processed";
+// NAS paths — TrueNAS 'astro' share, per platform.
+//   Windows: share mapped as drive Z:
+//   macOS:   share mounted by Finder at /Volumes/Astro
+// Folder case (Raw / Processed) must match the NAS exactly on macOS.
+var NAS_RAW_ROOT, NAS_PROCESSED_ROOT;
+if (isWindows) {
+    NAS_RAW_ROOT       = "Z:/Raw";
+    NAS_PROCESSED_ROOT = "Z:/Processed";
+} else {
+    NAS_RAW_ROOT       = "/Volumes/Astro/Raw";
+    NAS_PROCESSED_ROOT = "/Volumes/Astro/Processed";
+}
 //   Darks: NAS_RAW_ROOT/<YYYY-MM-DD>/darks/<exp>s/Dark_*.fit
 //   Flats: NAS_RAW_ROOT/<YYYY-MM-DD>/flats/Flat_*.fit
 
@@ -1478,7 +1493,7 @@ Console.writeln("RAW root      : " + NAS_RAW_ROOT);
 Console.writeln("Processed root: " + NAS_PROCESSED_ROOT);
 
 var dlg = new GetDirectoryDialog;
-dlg.caption     = "Select a date folder (e.g. Z:/RAW/2026-02-11) or Z:/RAW to process all dates";
+dlg.caption     = "Select a date folder (e.g. " + NAS_RAW_ROOT + "/2026-02-11) or " + NAS_RAW_ROOT + " to process all dates";
 dlg.initialPath = NAS_RAW_ROOT;
 
 if (!dlg.execute()) {
