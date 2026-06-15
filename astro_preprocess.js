@@ -1,3 +1,9 @@
+#engine v8
+// ^ PixInsight 1.9.4+ runs PJSR on Google's V8 engine. This directive
+//   selects it explicitly. The native macOS ARM build has ONLY V8 (no
+//   legacy SpiderMonkey), so this is required there; on x64 builds V8 is
+//   also available, so the same line works on Windows/Intel.
+
 // ============================================================
 // astro_preprocess.js — OSC Preprocessing Pipeline
 // ZWO ASI533 MC Pro (RGGB) · PixInsight PJSR
@@ -33,14 +39,29 @@
 //   - PI cannot reliably create folders on network shares; PowerShell handles this
 // ============================================================
 
-// Load ImageSolver script (AdP = Astrometry & Photometry tools)
-// #define USE_SOLVER_LIBRARY suppresses the main() call at the bottom
-// of ImageSolver.js so it doesn't show the dialog on include.
-// Relative include resolves against THIS file's directory, so it is
-// cross-platform PROVIDED astro_preprocess.js lives in PixInsight's own
-// scripts dir (.../PixInsight/src/scripts/) alongside the AdP folder.
+// ── Plate solving (ImageSolver 6.4.1, V8-native) ─────────────
+// MASTER SWITCH. While DISABLE_PLATE_SOLVING is defined, the ImageSolver
+// include AND the solve step are both skipped, so the calibrate→drizzle
+// pipeline runs fully under V8 (including native macOS ARM) without a WCS
+// step. Currently ON because embedding ImageSolver 6.4.1 as a library
+// under V8 still trips a SETTINGS_MODULE macro-vs-runtime conflict (the
+// eval at ImageSolver.js:29). Comment this line out to re-enable solving
+// once that embedding contract is resolved.
+#define DISABLE_PLATE_SOLVING
+
+// #define USE_SOLVER_LIBRARY suppresses ImageSolver's main() dialog on
+// include. The relative include resolves against THIS file's directory,
+// so it is cross-platform PROVIDED astro_preprocess.js lives in
+// PixInsight's own scripts dir (.../PixInsight/src/scripts/).
+#ifndef DISABLE_PLATE_SOLVING
+// In library mode (USE_SOLVER_LIBRARY) ImageSolver.js does NOT define
+// SETTINGS_MODULE — it only does so when run standalone. The host script
+// must define it so the transitively-included pjsr astrometry modules
+// (AstronomicalCatalogs.js, etc.) can reference it as a preprocessor macro.
+#define SETTINGS_MODULE "ImageSolver"
 #define USE_SOLVER_LIBRARY
-#include "AdP/ImageSolver.js"
+#include "ImageSolver/ImageSolver.js"
+#endif
 
 // ── Configuration ────────────────────────────────────────────
 // Platform is auto-detected from PixInsight's install path:
@@ -76,7 +97,7 @@ var BAYER_PATTERN = 0;
 var DRIZZLE_SCALE = 2.0;
 
 // Path to PixInsight's ImageSolver script (AdP = Astrometry & Photometry)
-var IMAGE_SOLVER_PATH = CoreApplication.srcDirPath + "/scripts/AdP/ImageSolver.js";
+var IMAGE_SOLVER_PATH = CoreApplication.srcDirPath + "/scripts/ImageSolver/ImageSolver.js";
 var g_imageSolverLoaded = false;
 
 // Constants from ImageSolver.js #define macros — need JS variable definitions
@@ -1375,6 +1396,7 @@ function processSession(objectName, dateStr, sourceDir, processedBase) {
                 objectName.replace(/ /g, "_") + "_" + dateStr + ".xisf";
             var drizzleWin = runDrizzleIntegration(saResult.drizzle, drizzleOut);
 
+#ifndef DISABLE_PLATE_SOLVING
             // Plate solve the open drizzle window before closing it
             // so SPCC can use the solution on the open window.
             log("\n[8+] ImageSolver...");
@@ -1397,6 +1419,13 @@ function processSession(objectName, dateStr, sourceDir, processedBase) {
             } else {
                 closeAllWindows();
             }
+#else
+            // Plate solving disabled (see DISABLE_PLATE_SOLVING above).
+            // The drizzle stack is already on disk from runDrizzleIntegration();
+            // just close the windows it left open for the (skipped) solve step.
+            log("\n[8+] ImageSolver skipped (DISABLE_PLATE_SOLVING).");
+            closeAllWindows();
+#endif
             finalOutput = drizzleOut;
         } else {
             log("\n[8/8] WARNING: DrizzleIntegration skipped \u2014 no .xdrz files.");
