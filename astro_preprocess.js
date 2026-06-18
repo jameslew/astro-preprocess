@@ -96,23 +96,25 @@ var BAYER_PATTERN = 0;
 // Requires generateDrizzleData = true in StarAlignment (already set).
 var DRIZZLE_SCALE = 2.0;
 
-// Path to PixInsight's ImageSolver script (AdP = Astrometry & Photometry)
+#ifndef DISABLE_PLATE_SOLVING
+// ── Solver-only scaffold (skipped while DISABLE_PLATE_SOLVING is set) ──
+// NOTE: this is AdP/SpiderMonkey-era scaffolding. Under ImageSolver 6.4.1
+// the correct mechanism is the `#define SETTINGS_MODULE` in the include
+// block above; this runtime-eval block is almost certainly obsolete and
+// should be revisited (likely deleted) once the 6.4.1 library embedding
+// is sorted out with Conejero.
 var IMAGE_SOLVER_PATH = CoreApplication.srcDirPath + "/scripts/ImageSolver/ImageSolver.js";
 var g_imageSolverLoaded = false;
 
-// Constants from ImageSolver.js #define macros — need JS variable definitions
-// for runtime evaluation (preprocessor macros don't persist as JS variables)
 if (typeof Ext_DataType_Complex     === "undefined") var Ext_DataType_Complex     = 1000;
 if (typeof Ext_DataType_StringArray === "undefined") var Ext_DataType_StringArray = 1001;
 if (typeof Ext_DataType_JSON        === "undefined") var Ext_DataType_JSON        = 1002;
-// Define solver module name as a JS variable using indirect assignment
-// so the preprocessor doesn't substitute the macro name itself.
-// StarDetector.jsh expects this to exist as a runtime JS variable.
 var _smKey = "SETTINGS" + "_MODULE";
 if (typeof eval(_smKey) === "undefined") {
     var SETTINGS_MODULE_JS = "ImageSolver";
     eval("var " + _smKey + " = SETTINGS_MODULE_JS");
 }
+#endif
 
 // ── Image solving helper ──────────────────────────────────────
 // Convert ISO date string (YYYY-MM-DDTHH:MM:SS.sss) to Julian Date
