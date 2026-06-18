@@ -1459,7 +1459,13 @@ function processSession(objectName, dateStr, sourceDir, processedBase) {
         sf.close();
 
     } catch (e) {
-        log("\n\u2717 ERROR [" + objectName + " / " + dateStr + "]: " + e.message);
+        // e.message can be undefined for non-Error throws (e.g. some PJSR
+        // process failures), so fall back to toString() and log the stack.
+        var emsg = (e && e.message) ? e.message
+                 : (e !== undefined && e !== null) ? e.toString()
+                 : "unknown error (no exception object)";
+        log("\n\u2717 ERROR [" + objectName + " / " + dateStr + "]: " + emsg);
+        if (e && e.stack) log("  stack: " + e.stack);
         closeAllWindows();
     }
     logClose();
