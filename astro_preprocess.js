@@ -1,3 +1,9 @@
+#engine v8
+// ^ PixInsight 1.9.4+ runs PJSR on Google's V8 engine. This directive
+//   selects it explicitly. The native macOS ARM build has ONLY V8 (no
+//   legacy SpiderMonkey), so this is required there; on x64 builds V8 is
+//   also available, so the same line works on Windows/Intel.
+
 // ============================================================
 // astro_preprocess.js — OSC Preprocessing Pipeline
 // ZWO ASI533 MC Pro (RGGB) · PixInsight PJSR
@@ -33,13 +39,49 @@
 //   - PI cannot reliably create folders on network shares; PowerShell handles this
 // ============================================================
 
-// ── Configuration ────────────────────────────────────────────
-// NAS paths — edit to match your setup.
-// isWindows is kept for the ensureDir() shell command selection.
-var isWindows = true;
+// ── Plate solving (ImageSolver 6.4.1, V8-native) ─────────────
+// MASTER SWITCH. While DISABLE_PLATE_SOLVING is defined, the ImageSolver
+// include AND the solve step are both skipped, so the calibrate→drizzle
+// pipeline runs fully under V8 (including native macOS ARM) without a WCS
+// step. Currently ON because embedding ImageSolver 6.4.1 as a library
+// under V8 still trips a SETTINGS_MODULE macro-vs-runtime conflict (the
+// eval at ImageSolver.js:29). Comment this line out to re-enable solving
+// once that embedding contract is resolved.
+#define DISABLE_PLATE_SOLVING
 
-var NAS_RAW_ROOT       = "Z:/Raw";
-var NAS_PROCESSED_ROOT = "Z:/Processed";
+// #define USE_SOLVER_LIBRARY suppresses ImageSolver's main() dialog on
+// include. The relative include resolves against THIS file's directory,
+// so it is cross-platform PROVIDED astro_preprocess.js lives in
+// PixInsight's own scripts dir (.../PixInsight/src/scripts/).
+#ifndef DISABLE_PLATE_SOLVING
+// In library mode (USE_SOLVER_LIBRARY) ImageSolver.js does NOT define
+// SETTINGS_MODULE — it only does so when run standalone. The host script
+// must define it so the transitively-included pjsr astrometry modules
+// (AstronomicalCatalogs.js, etc.) can reference it as a preprocessor macro.
+#define SETTINGS_MODULE "ImageSolver"
+#define USE_SOLVER_LIBRARY
+#include "ImageSolver/ImageSolver.js"
+#endif
+
+// ── Configuration ────────────────────────────────────────────
+// Platform is auto-detected from PixInsight's install path:
+//   Windows src dir is like "C:/..."  -> drive-letter colon at index 1
+//   macOS/Linux src dir is like "/Applications/..." -> leading slash
+// isWindows drives both the NAS roots below and the ensureDir() shell call.
+var isWindows = (CoreApplication.srcDirPath.charAt(1) === ":");
+
+// NAS paths — TrueNAS 'astro' share, per platform.
+//   Windows: share mapped as drive Z:
+//   macOS:   share mounted by Finder at /Volumes/Astro
+// Folder case (Raw / Processed) must match the NAS exactly on macOS.
+var NAS_RAW_ROOT, NAS_PROCESSED_ROOT;
+if (isWindows) {
+    NAS_RAW_ROOT       = "Z:/Raw";
+    NAS_PROCESSED_ROOT = "Z:/Processed";
+} else {
+    NAS_RAW_ROOT       = "/Volumes/Astro/Raw";
+    NAS_PROCESSED_ROOT = "/Volumes/Astro/Processed";
+}
 //   Darks: NAS_RAW_ROOT/<YYYY-MM-DD>/darks/<exp>s/Dark_*.fit
 //   Flats: NAS_RAW_ROOT/<YYYY-MM-DD>/flats/Flat_*.fit
 
@@ -53,6 +95,128 @@ var BAYER_PATTERN = 0;
 // Drizzle output scale factor. 2.0 produces a 2× larger final stack.
 // Requires generateDrizzleData = true in StarAlignment (already set).
 var DRIZZLE_SCALE = 2.0;
+
+// ── Process enum resolvers ───────────────────────────────────
+// PixInsight 1.9.4 (V8) moved process enum constants off <Process>.prototype
+// and onto the constructor object itself — e.g. StarAlignment.DDMThinPlateSpline
+// instead of StarAlignment.prototype.DDMThinPlateSpline (the latter is now
+// undefined). These resolvers pick whichever location actually holds the
+// constants, so the SA/II/DI config below works on 1.9.4 and older builds alike.
+// All constant references use SAk./IIk./DIk. accordingly.
+var SAk = (StarAlignment.RegisterMatch      !== undefined) ? StarAlignment      : StarAlignment.prototype;
+var IIk = (ImageIntegration.Average         !== undefined) ? ImageIntegration   : ImageIntegration.prototype;
+var DIk = (DrizzleIntegration.Kernel_Square !== undefined) ? DrizzleIntegration : DrizzleIntegration.prototype;
+var ICk = (ImageCalibration.Auto            !== undefined) ? ImageCalibration   : ImageCalibration.prototype;
+var LNk = (LocalNormalization.PSFType_Auto  !== undefined) ? LocalNormalization : LocalNormalization.prototype;
+
+#ifndef DISABLE_PLATE_SOLVING
+// ── Solver-only scaffold (skipped while DISABLE_PLATE_SOLVING is set) ──
+// NOTE: this is AdP/SpiderMonkey-era scaffolding. Under ImageSolver 6.4.1
+// the correct mechanism is the `#define SETTINGS_MODULE` in the include
+// block above; this runtime-eval block is almost certainly obsolete and
+// should be revisited (likely deleted) once the 6.4.1 library embedding
+// is sorted out with Conejero.
+var IMAGE_SOLVER_PATH = CoreApplication.srcDirPath + "/scripts/ImageSolver/ImageSolver.js";
+var g_imageSolverLoaded = false;
+
+if (typeof Ext_DataType_Complex     === "undefined") var Ext_DataType_Complex     = 1000;
+if (typeof Ext_DataType_StringArray === "undefined") var Ext_DataType_StringArray = 1001;
+if (typeof Ext_DataType_JSON        === "undefined") var Ext_DataType_JSON        = 1002;
+var _smKey = "SETTINGS" + "_MODULE";
+if (typeof eval(_smKey) === "undefined") {
+    var SETTINGS_MODULE_JS = "ImageSolver";
+    eval("var " + _smKey + " = SETTINGS_MODULE_JS");
+}
+#endif
+
+// ── Image solving helper ──────────────────────────────────────
+// Convert ISO date string (YYYY-MM-DDTHH:MM:SS.sss) to Julian Date
+function isoToJulianDate(iso) {
+    var s = iso.replace(/'/g, "").trim();
+    var m = s.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(\.\d+)?/);
+    if (!m) return null;
+    var Y = parseInt(m[1]), M = parseInt(m[2]), D = parseInt(m[3]);
+    var h = parseInt(m[4]), mn = parseInt(m[5]), sc = parseFloat((m[6]||"0") + (m[7]||""));
+    // Standard JD formula
+    var A = Math.floor((14 - M) / 12);
+    var y = Y + 4800 - A;
+    var mo = M + 12 * A - 3;
+    var JDN = D + Math.floor((153 * mo + 2) / 5) + 365 * y +
+              Math.floor(y / 4) - Math.floor(y / 100) + Math.floor(y / 400) - 32045;
+    return JDN + (h - 12) / 24 + mn / 1440 + sc / 86400;
+}
+
+// Run ImageSolver on an already-open ImageWindow.
+// Skips solving if the image already has a valid astrometric solution.
+// Returns true if solved (or already solved), false on failure.
+function runImageSolver(win, drizzleScale) {
+    if (!File.exists(IMAGE_SOLVER_PATH)) {
+        log("  ImageSolver not found at: " + IMAGE_SOLVER_PATH);
+        return false;
+    }
+
+    // ImageSolver is loaded via #include at the top of the file
+    // (PJSR #include is a preprocessor directive, must be at top level)
+
+    // Check if already fully plate-solved (needs ref_I_G transformation matrix,
+    // not just RA/DEC pointing coords from ASIAIR)
+    var checkMeta = new ImageMetadata();
+    checkMeta.ExtractMetadata(win);
+    if (checkMeta.ref_I_G !== null && checkMeta.resolution > 0) {
+        log("  ImageSolver: full plate solution already present (res=" +
+            (checkMeta.resolution * 3600).toFixed(3) + " arcsec/px), skipping.");
+        return true;
+    }
+
+    var solver = new ImageSolver();
+    solver.solverCfg.useActive            = false;
+    solver.solverCfg.showStars            = false;
+    solver.solverCfg.showDistortion       = false;
+    solver.solverCfg.generateErrorImg     = false;
+    solver.solverCfg.catalog              = "GaiaDR3_XPSD";
+    solver.solverCfg.autoMagnitude        = true;
+    solver.solverCfg.distortionCorrection = true;
+    solver.solverCfg.maxIterations        = 10;
+
+    // Seed metadata from FITS keywords
+    solver.metadata.width    = win.mainView.image.width;
+    solver.metadata.height   = win.mainView.image.height;
+    solver.metadata.xpixsz   = 3.76;  // ASI533 MC Pro pixel size in microns
+    solver.metadata.useFocal = false;
+    // Resolution: native arcsec/px divided by drizzle scale
+    var nativeResolution = 0.733;  // arcsec/px for ASI533 at ~1058mm FL
+    solver.metadata.resolution = (nativeResolution / (drizzleScale || 1)) / 3600;  // degrees/px
+
+    var keys = win.keywords;
+    for (var i = 0; i < keys.length; i++) {
+        var k = keys[i];
+        if (k.name === "RA")       solver.metadata.ra  = parseFloat(k.value);
+        if (k.name === "DEC")      solver.metadata.dec = parseFloat(k.value);
+        if (k.name === "DATE-OBS") {
+            var jd = isoToJulianDate(k.value);
+            if (jd) { solver.metadata.epoch = jd; solver.metadata.observationTime = jd; }
+        }
+        if (k.name === "DATE-END") {
+            var jd2 = isoToJulianDate(k.value);
+            if (jd2) solver.metadata.endTime = jd2;
+        }
+        if (k.name === "FOCALLEN" && parseFloat(k.value) > 0)
+            solver.metadata.focal = parseFloat(k.value) / (drizzleScale || 1);
+    }
+
+    log("  ImageSolver: RA=" + solver.metadata.ra.toFixed(4) +
+        " Dec=" + solver.metadata.dec.toFixed(4) +
+        " res=" + (solver.metadata.resolution * 3600).toFixed(3) + " arcsec/px");
+
+    var result = solver.SolveImage(win);
+    if (result) {
+        log("  ImageSolver: solved successfully.");
+    } else {
+        log("  WARNING: ImageSolver failed — image will not have astrometric solution.");
+    }
+    return result;
+}
+
 
 // Maximum number of days to search forward/backward from session date
 // when looking for matching darks or flats. Covers the common case of
@@ -329,11 +493,11 @@ function buildMasterDark(darkRawFiles, outputFile) {
     var II = new ImageIntegration;
     II.images                   = images;
     II.inputHints               = "fits-keywords normalize raw cfa use-roworder-keywords signed-is-physical";
-    II.combination              = ImageIntegration.prototype.Average;
-    II.weightMode               = ImageIntegration.prototype.NoiseEvaluation;
-    II.normalization            = ImageIntegration.prototype.NoNormalization;
-    II.rejection                = ImageIntegration.prototype.WinsorizedSigmaClip;
-    II.rejectionNormalization   = ImageIntegration.prototype.Scale;
+    II.combination              = IIk.Average;
+    II.weightMode               = IIk.NoiseEvaluation;
+    II.normalization            = IIk.NoNormalization;
+    II.rejection                = IIk.WinsorizedSigmaClip;
+    II.rejectionNormalization   = IIk.Scale;
     II.sigmaLow                 = 4.000;
     II.sigmaHigh                = 3.000;
     II.winsorizationCutoff      = 5.000;
@@ -412,11 +576,11 @@ function buildMasterFlat(flatRawFiles, masterDarkFile, outputFile) {
             flatTargets.push([true, flatRawFiles[i]]);
         ICF.targetFrames            = flatTargets;
         ICF.enableCFA               = true;
-        ICF.cfaPattern              = ImageCalibration.prototype.Auto;
+        ICF.cfaPattern              = ICk.Auto;
         ICF.inputHints              = "fits-keywords normalize only-first-image raw cfa use-roworder-keywords signed-is-physical";
         ICF.outputHints             = "properties fits-keywords no-compress-data block-alignment 4096 max-inline-block-size 3072 no-embedded-data no-resolution ";
         ICF.pedestal                = 0;
-        ICF.pedestalMode            = ImageCalibration.prototype.Keyword;
+        ICF.pedestalMode            = ICk.Keyword;
         ICF.masterBiasEnabled       = false;
         ICF.masterDarkEnabled       = true;
         ICF.masterDarkPath          = masterDarkFile;
@@ -425,7 +589,7 @@ function buildMasterFlat(flatRawFiles, masterDarkFile, outputFile) {
         ICF.calibrateDark           = false;
         ICF.calibrateFlat           = false;
         ICF.optimizeDarks           = false;
-        ICF.darkCFADetectionMode    = ImageCalibration.prototype.DetectCFA;
+        ICF.darkCFADetectionMode    = ICk.DetectCFA;
         ICF.separateCFAFlatScalingFactors = false;
         ICF.flatScaleClippingFactor = 0.05;
         ICF.evaluateNoise           = false;
@@ -434,9 +598,9 @@ function buildMasterFlat(flatRawFiles, masterDarkFile, outputFile) {
         ICF.outputExtension         = ".xisf";
         ICF.outputPrefix            = "";
         ICF.outputPostfix           = "_c";
-        ICF.outputSampleFormat      = ImageCalibration.prototype.f32;
+        ICF.outputSampleFormat      = ICk.f32;
         ICF.overwriteExistingFiles  = true;
-        ICF.onError                 = ImageCalibration.prototype.Continue;
+        ICF.onError                 = ICk.Continue;
         ICF.noGUIMessages           = true;
         ICF.useFileThreads          = true;
         ICF.fileThreadOverload      = 1.00;
@@ -468,11 +632,11 @@ function buildMasterFlat(flatRawFiles, masterDarkFile, outputFile) {
     II.images                   = images;
     II.inputHints               = (masterDarkFile !== null) ? "" :
                                    "fits-keywords normalize raw cfa use-roworder-keywords signed-is-physical";
-    II.combination              = ImageIntegration.prototype.Average;
-    II.weightMode               = ImageIntegration.prototype.NoiseEvaluation;
-    II.normalization            = ImageIntegration.prototype.Multiplicative;
-    II.rejection                = ImageIntegration.prototype.WinsorizedSigmaClip;
-    II.rejectionNormalization   = ImageIntegration.prototype.Scale;
+    II.combination              = IIk.Average;
+    II.weightMode               = IIk.NoiseEvaluation;
+    II.normalization            = IIk.Multiplicative;
+    II.rejection                = IIk.WinsorizedSigmaClip;
+    II.rejectionNormalization   = IIk.Scale;
     II.sigmaLow                 = 4.000;
     II.sigmaHigh                = 3.000;
     II.winsorizationCutoff      = 5.000;
@@ -546,20 +710,20 @@ function runImageCalibration(rawFitFiles, outputDir, masterDarkFile, masterFlatF
 
     // CFA-mode: calibrate raw Bayer pattern before debayering
     IC.enableCFA               = true;
-    IC.cfaPattern              = ImageCalibration.prototype.Auto;
+    IC.cfaPattern              = ICk.Auto;
     IC.inputHints              = "fits-keywords normalize only-first-image raw cfa use-roworder-keywords signed-is-physical";
     IC.outputHints             = "properties fits-keywords no-compress-data block-alignment 4096 max-inline-block-size 3072 no-embedded-data no-resolution ";
     IC.pedestal                = 0;
-    IC.pedestalMode            = ImageCalibration.prototype.Keyword;
+    IC.pedestalMode            = ICk.Keyword;
     IC.pedestalKeyword         = "";
 
     IC.outputDirectory         = outputDir;
     IC.outputExtension         = ".xisf";
     IC.outputPrefix            = "";
     IC.outputPostfix           = "_c";
-    IC.outputSampleFormat      = ImageCalibration.prototype.f32;
+    IC.outputSampleFormat      = ICk.f32;
     IC.overwriteExistingFiles  = true;
-    IC.onError                 = ImageCalibration.prototype.Continue;
+    IC.onError                 = ICk.Continue;
 
     // Master dark
     IC.masterBiasEnabled       = false;
@@ -575,12 +739,12 @@ function runImageCalibration(rawFitFiles, outputDir, masterDarkFile, masterFlatF
     IC.darkOptimizationThreshold = 0.00000;
     IC.darkOptimizationLow     = 3.0000;
     IC.darkOptimizationWindow  = 0;
-    IC.darkCFADetectionMode    = ImageCalibration.prototype.DetectCFA;
+    IC.darkCFADetectionMode    = ICk.DetectCFA;
     IC.separateCFAFlatScalingFactors = true;
     IC.flatScaleClippingFactor = 0.05;
 
     IC.evaluateNoise           = true;
-    IC.noiseEvaluationAlgorithm = ImageCalibration.prototype.NoiseEvaluation_MRS;
+    IC.noiseEvaluationAlgorithm = ICk.NoiseEvaluation_MRS;
     IC.evaluateSignal          = true;
     IC.structureLayers         = 5;
     IC.saturationThreshold     = 1.00;
@@ -589,7 +753,7 @@ function runImageCalibration(rawFitFiles, outputDir, masterDarkFile, masterFlatF
     IC.hotPixelFilterRadius    = 1;
     IC.noiseReductionFilterRadius = 0;
     IC.minStructureSize        = 0;
-    IC.psfType                 = ImageCalibration.prototype.PSFType_Moffat4;
+    IC.psfType                 = ICk.PSFType_Moffat4;
     IC.psfGrowth               = 1.00;
     IC.maxStars                = 24576;
 
@@ -712,7 +876,7 @@ function runLocalNormalization(registeredFiles, referenceFile, outputDir) {
     LN.hotPixelFilterRadius     = 2;
     LN.noiseReductionFilterRadius = 0;
     LN.modelScalingFactor       = 8;
-    LN.scaleEvaluationMethod    = LocalNormalization.prototype.ScaleEvaluationMethod_PSFSignal;
+    LN.scaleEvaluationMethod    = LNk.ScaleEvaluationMethod_PSFSignal;
     LN.localScaleCorrections    = false;
     LN.psfStructureLayers       = 5;
     LN.saturationThreshold      = 0.75;
@@ -725,10 +889,10 @@ function runLocalNormalization(registeredFiles, referenceFile, outputDir) {
     LN.psfMinStructureSize      = 0;
     LN.psfMinSNR                = 40;
     LN.psfAllowClusteredSources = true;
-    LN.psfType                  = LocalNormalization.prototype.PSFType_Auto;
+    LN.psfType                  = LNk.PSFType_Auto;
     LN.psfGrowth                = 1.00;
     LN.psfMaxStars              = 24576;
-    LN.generateNormalizedImages = LocalNormalization.prototype.GenerateNormalizedImages_GlobalExecutionOnly;
+    LN.generateNormalizedImages = LNk.GenerateNormalizedImages_GlobalExecutionOnly;
     LN.generateNormalizationData = true;
     LN.generateInvalidData      = false;
     LN.generateHistoryProperties = true;
@@ -739,7 +903,7 @@ function runLocalNormalization(registeredFiles, referenceFile, outputDir) {
     LN.outputPrefix             = "";
     LN.outputPostfix            = "_n";
     LN.overwriteExistingFiles   = true;
-    LN.onError                  = LocalNormalization.prototype.OnError_Continue;
+    LN.onError                  = LNk.OnError_Continue;
     LN.useFileThreads           = true;
     LN.fileThreadOverload       = 1.00;
     LN.maxFileReadThreads       = 0;
@@ -791,7 +955,7 @@ function runStarAlignment(inputFiles, outputDir) {
     SA.distortionCorrection         = false;
     SA.distortionMaxIterations      = 20;
     SA.distortionMatcherExpansion   = 1.00;
-    SA.rbfType                      = StarAlignment.prototype.DDMThinPlateSpline;
+    SA.rbfType                      = SAk.DDMThinPlateSpline;
     SA.maxSplinePoints              = 4000;
     SA.splineOrder                  = 2;
     SA.splineSmoothness             = 0.005;
@@ -806,13 +970,13 @@ function runStarAlignment(inputFiles, outputDir) {
     SA.ransacMaximizeRegularity     = 1.00;
     SA.ransacMinimizeError          = 1.00;
     SA.maxStars                     = 0;
-    SA.fitPSF                       = StarAlignment.prototype.FitPSF_DistortionOnly;
+    SA.fitPSF                       = SAk.FitPSF_DistortionOnly;
     SA.psfTolerance                 = 0.50;
     SA.useTriangles                 = false;
     SA.polygonSides                 = 5;
     SA.descriptorsPerStar           = 20;
     SA.restrictToPreviews           = false;  // false for global execution
-    SA.intersection                 = StarAlignment.prototype.MosaicOnly;
+    SA.intersection                 = SAk.MosaicOnly;
     SA.useBrightnessRelations       = false;
     SA.useScaleDifferences          = false;
     SA.scaleTolerance               = 0.100;
@@ -821,7 +985,7 @@ function runStarAlignment(inputFiles, outputDir) {
     SA.targets                      = targets;
     SA.inputHints                   = "fits-keywords normalize only-first-image";
     SA.outputHints                  = "properties fits-keywords no-compress-data block-alignment 4096 max-inline-block-size 3072 no-embedded-data no-resolution no-icc-profile";
-    SA.mode                         = StarAlignment.prototype.RegisterMatch;
+    SA.mode                         = SAk.RegisterMatch;
     SA.writeKeywords                = true;
     SA.generateMasks                = false;
     SA.generateDrizzleData          = true;
@@ -830,15 +994,15 @@ function runStarAlignment(inputFiles, outputDir) {
     SA.inheritAstrometricSolution   = true;
     SA.frameAdaptation              = false;
     SA.randomizeMosaic              = false;
-    SA.pixelInterpolation           = StarAlignment.prototype.Auto;
+    SA.pixelInterpolation           = SAk.Auto;
     SA.clampingThreshold            = 0.30;
     SA.outputDirectory              = outputDir;
     SA.outputExtension              = ".xisf";
     SA.outputPrefix                 = "";
     SA.outputPostfix                = "_r";
-    SA.outputSampleFormat           = StarAlignment.prototype.f32;
+    SA.outputSampleFormat           = SAk.f32;
     SA.overwriteExistingFiles       = true;
-    SA.onError                      = StarAlignment.prototype.Continue;
+    SA.onError                      = SAk.Continue;
     SA.useFileThreads               = true;
     SA.fileThreadOverload           = 1.00;
     SA.memoryLoadControl            = true;
@@ -886,17 +1050,17 @@ function runImageIntegration(registeredFiles, drizzleFiles, outputDir, normDataF
     II.inputHints                       = "";
     II.overrideImageType                = false;
     II.imageType                        = 0;
-    II.combination                      = ImageIntegration.prototype.Average;
-    II.weightMode                       = ImageIntegration.prototype.PSFSignalWeight;
+    II.combination                      = IIk.Average;
+    II.weightMode                       = IIk.PSFSignalWeight;
     II.weightKeyword                    = "WBPPWGHT";
-    II.weightScale                      = ImageIntegration.prototype.WeightScale_BWMV;
+    II.weightScale                      = IIk.WeightScale_BWMV;
     II.minWeight                        = 0.050000;
     II.adaptiveGridSize                 = 16;
     II.adaptiveNoScale                  = false;
     II.ignoreNoiseKeywords              = false;
-    II.normalization                    = ImageIntegration.prototype.AdditiveWithScaling;
-    II.rejection                        = ImageIntegration.prototype.WinsorizedSigmaClip;
-    II.rejectionNormalization           = ImageIntegration.prototype.Scale;
+    II.normalization                    = IIk.AdditiveWithScaling;
+    II.rejection                        = IIk.WinsorizedSigmaClip;
+    II.rejectionNormalization           = IIk.Scale;
     II.minMaxLow                        = 1;
     II.minMaxHigh                       = 1;
     II.pcClipLow                        = 0.200;
@@ -938,10 +1102,10 @@ function runImageIntegration(registeredFiles, drizzleFiles, outputDir, normDataF
     II.useROI                           = false;
     II.useCache                         = true;
     II.evaluateSNR                      = true;
-    II.noiseEvaluationAlgorithm         = ImageIntegration.prototype.NoiseEvaluation_MRS;
+    II.noiseEvaluationAlgorithm         = IIk.NoiseEvaluation_MRS;
     II.mrsMinDataFraction               = 0.010;
     II.psfStructureLayers               = 5;
-    II.psfType                          = ImageIntegration.prototype.PSFType_Moffat4;
+    II.psfType                          = IIk.PSFType_Moffat4;
     II.generateFITSKeywords             = true;
     II.subtractPedestals                = false;
     II.truncateOnOutOfRange             = false;
@@ -986,7 +1150,7 @@ function runDrizzleIntegration(drizzleFiles, outputFile) {
     DI.inputDirectory               = "";
     DI.scale                        = DRIZZLE_SCALE;
     DI.dropShrink                   = 1.00;
-    DI.kernelFunction               = DrizzleIntegration.prototype.Kernel_Square;
+    DI.kernelFunction               = DIk.Kernel_Square;
     DI.kernelGridSize               = 16;
     DI.originX                      = 0.50;
     DI.originY                      = 0.50;
@@ -1008,15 +1172,17 @@ function runDrizzleIntegration(drizzleFiles, outputFile) {
     DI.truncateOnOutOfRange         = false;
     DI.noGUIMessages                = true;
     DI.showImages                   = true;
-    DI.onError                      = DrizzleIntegration.prototype.Continue;
+    DI.onError                      = DIk.Continue;
 
     if (!DI.executeGlobal())
         throw new Error("DrizzleIntegration failed.");
 
     // DI produces two windows: the integration and a weights map.
-    // Save the main image (not the weights map) and close both.
+    // Save the main image and close the weights map.
+    // Return the main window open so caller can plate-solve it before closing.
     var wins = ImageWindow.windows;
     var saved = false;
+    var mainWin = null;
     for (var i = wins.length - 1; i >= 0; i--) {
         if (!wins[i].isNull) {
             var id = wins[i].currentView.id;
@@ -1024,12 +1190,15 @@ function runDrizzleIntegration(drizzleFiles, outputFile) {
                 wins[i].saveAs(outputFile, false, false, false, false);
                 log("  Drizzle saved: " + outputFile);
                 saved = true;
+                mainWin = wins[i];  // keep open for plate solving
+            } else {
+                wins[i].close();  // close weights map
             }
-            wins[i].close();
         }
     }
     if (!saved)
         throw new Error("DrizzleIntegration: main output window not found.");
+    return mainWin;  // caller is responsible for closing
 }
 
 // ── Session processor ────────────────────────────────────────
@@ -1240,8 +1409,38 @@ function processSession(objectName, dateStr, sourceDir, processedBase) {
                 validDrizzle.length + " frames)...");
             var drizzleOut = masterDir + "/drizzle_" +
                 objectName.replace(/ /g, "_") + "_" + dateStr + ".xisf";
-            runDrizzleIntegration(saResult.drizzle, drizzleOut);
+            var drizzleWin = runDrizzleIntegration(saResult.drizzle, drizzleOut);
+
+#ifndef DISABLE_PLATE_SOLVING
+            // Plate solve the open drizzle window before closing it
+            // so SPCC can use the solution on the open window.
+            log("\n[8+] ImageSolver...");
+            if (drizzleWin !== null && !drizzleWin.isNull) {
+                var solved = runImageSolver(drizzleWin, DRIZZLE_SCALE);
+                if (solved) {
+                    log("  Plate solution applied — saving to disk...");
+                    // Save with preserve=true to retain XISF properties including WCS
+                    drizzleWin.saveAs(drizzleOut, false, false, false, true);
+                    log("  Plate solution saved to: " + drizzleOut);
+                    // Close everything except the solved drizzle window
+                    var allWC = ImageWindow.windows;
+                    for (var wci = allWC.length - 1; wci >= 0; wci--) {
+                        if (!allWC[wci].isNull && allWC[wci] !== drizzleWin)
+                            allWC[wci].close();
+                    }
+                } else {
+                    closeAllWindows();
+                }
+            } else {
+                closeAllWindows();
+            }
+#else
+            // Plate solving disabled (see DISABLE_PLATE_SOLVING above).
+            // The drizzle stack is already on disk from runDrizzleIntegration();
+            // just close the windows it left open for the (skipped) solve step.
+            log("\n[8+] ImageSolver skipped (DISABLE_PLATE_SOLVING).");
             closeAllWindows();
+#endif
             finalOutput = drizzleOut;
         } else {
             log("\n[8/8] WARNING: DrizzleIntegration skipped \u2014 no .xdrz files.");
@@ -1273,7 +1472,13 @@ function processSession(objectName, dateStr, sourceDir, processedBase) {
         sf.close();
 
     } catch (e) {
-        log("\n\u2717 ERROR [" + objectName + " / " + dateStr + "]: " + e.message);
+        // e.message can be undefined for non-Error throws (e.g. some PJSR
+        // process failures), so fall back to toString() and log the stack.
+        var emsg = (e && e.message) ? e.message
+                 : (e !== undefined && e !== null) ? e.toString()
+                 : "unknown error (no exception object)";
+        log("\n\u2717 ERROR [" + objectName + " / " + dateStr + "]: " + emsg);
+        if (e && e.stack) log("  stack: " + e.stack);
         closeAllWindows();
     }
     logClose();
@@ -1338,7 +1543,7 @@ Console.writeln("RAW root      : " + NAS_RAW_ROOT);
 Console.writeln("Processed root: " + NAS_PROCESSED_ROOT);
 
 var dlg = new GetDirectoryDialog;
-dlg.caption     = "Select a date folder (e.g. Z:/RAW/2026-02-11) or Z:/RAW to process all dates";
+dlg.caption     = "Select a date folder (e.g. " + NAS_RAW_ROOT + "/2026-02-11) or " + NAS_RAW_ROOT + " to process all dates";
 dlg.initialPath = NAS_RAW_ROOT;
 
 if (!dlg.execute()) {
