@@ -39,35 +39,36 @@
 //   - PI cannot reliably create folders on network shares; PowerShell handles this
 // ============================================================
 
-// ── Plate solving (ImageSolver 6.4.1, V8-native) ─────────────
-// MASTER SWITCH. While DISABLE_PLATE_SOLVING is defined, the ImageSolver
-// include AND the solve step are both skipped, so the calibrate→drizzle
-// pipeline runs fully under V8 (including native macOS ARM) without a WCS
-// step. Currently ON because embedding ImageSolver 6.4.1 as a library
-// under V8 still trips a SETTINGS_MODULE macro-vs-runtime conflict (the
-// eval at ImageSolver.js:29). Comment this line out to re-enable solving
-// once that embedding contract is resolved.
-#define DISABLE_PLATE_SOLVING
+// ── Plate solving (ImageSolver 6.5.0, PixInsight 1.9.5, V8) ──
+// ImageSolver is embedded as a library and called on the drizzle master
+// (see runImageSolver). Verified with test_solver.js on 1.9.5 / Windows.
+//
+// MASTER SWITCH: uncomment the next line to skip both the include and the
+// solve step, e.g. on a machine where the include path below is wrong.
+// #define DISABLE_PLATE_SOLVING
 
-// #define USE_SOLVER_LIBRARY suppresses ImageSolver's main() dialog on
-// include. The relative include resolves against THIS file's directory,
-// so it is cross-platform PROVIDED astro_preprocess.js lives in
-// PixInsight's own scripts dir (.../PixInsight/src/scripts/).
 #ifndef DISABLE_PLATE_SOLVING
-// In library mode (USE_SOLVER_LIBRARY) ImageSolver.js does NOT define
-// SETTINGS_MODULE — it only does so when run standalone. The host script
-// must define it so the transitively-included pjsr astrometry modules
-// (AstronomicalCatalogs.js, etc.) can reference it as a preprocessor macro.
-#define SETTINGS_MODULE "ImageSolver"
+// Library-mode contract: both defines must come BEFORE the include.
+//   USE_SOLVER_LIBRARY  suppresses ImageSolver's own main() dialog.
+//   SETTINGS_MODULE     names the settings key the included modules use.
+// Nothing else is needed under 1.9.5: the old AdP-era scaffolding
+// (Ext_DataType_* variables, eval of the settings-module name) is gone.
+#define SETTINGS_MODULE "AstroPreprocessSolver"
 #define USE_SOLVER_LIBRARY
-#include "ImageSolver/ImageSolver.js"
+// The include path is fixed at compile time, so it cannot use a variable.
+// Default install locations per platform; edit if PixInsight lives elsewhere.
+#ifeq __PI_PLATFORM__ MACOSX
+#include "/Applications/PixInsight/src/scripts/ImageSolver/ImageSolver.js"
+#else
+#include "C:/Program Files/PixInsight/src/scripts/ImageSolver/ImageSolver.js"
+#endif
 #endif
 
 // ── Configuration ────────────────────────────────────────────
 // Platform is auto-detected from PixInsight's install path:
 //   Windows src dir is like "C:/..."  -> drive-letter colon at index 1
 //   macOS/Linux src dir is like "/Applications/..." -> leading slash
-// isWindows drives both the NAS roots below and the ensureDir() shell call.
+// isWindows drives both the NAS roots below and the ensureDir() shell fallback.
 var isWindows = (CoreApplication.srcDirPath.charAt(1) === ":");
 
 // NAS paths — TrueNAS 'astro' share, per platform.
@@ -109,113 +110,108 @@ var DIk = (DrizzleIntegration.Kernel_Square !== undefined) ? DrizzleIntegration 
 var ICk = (ImageCalibration.Auto            !== undefined) ? ImageCalibration   : ImageCalibration.prototype;
 var LNk = (LocalNormalization.PSFType_Auto  !== undefined) ? LocalNormalization : LocalNormalization.prototype;
 
-#ifndef DISABLE_PLATE_SOLVING
-// ── Solver-only scaffold (skipped while DISABLE_PLATE_SOLVING is set) ──
-// NOTE: this is AdP/SpiderMonkey-era scaffolding. Under ImageSolver 6.4.1
-// the correct mechanism is the `#define SETTINGS_MODULE` in the include
-// block above; this runtime-eval block is almost certainly obsolete and
-// should be revisited (likely deleted) once the 6.4.1 library embedding
-// is sorted out with Conejero.
-var IMAGE_SOLVER_PATH = CoreApplication.srcDirPath + "/scripts/ImageSolver/ImageSolver.js";
-var g_imageSolverLoaded = false;
-
-if (typeof Ext_DataType_Complex     === "undefined") var Ext_DataType_Complex     = 1000;
-if (typeof Ext_DataType_StringArray === "undefined") var Ext_DataType_StringArray = 1001;
-if (typeof Ext_DataType_JSON        === "undefined") var Ext_DataType_JSON        = 1002;
-var _smKey = "SETTINGS" + "_MODULE";
-if (typeof eval(_smKey) === "undefined") {
-    var SETTINGS_MODULE_JS = "ImageSolver";
-    eval("var " + _smKey + " = SETTINGS_MODULE_JS");
-}
-#endif
-
 // ── Image solving helper ──────────────────────────────────────
-// Convert ISO date string (YYYY-MM-DDTHH:MM:SS.sss) to Julian Date
+var PIXEL_SIZE_UM         = 3.76;   // ASI533 MC Pro
+var FALLBACK_NATIVE_SCALE = 0.733;  // arcsec/px, used only when FOCALLEN is absent
+// Scale seeds tried in order, as multiples of the computed scale.
+var SOLVER_SCALE_FACTORS  = [1, 0.5, 2];
+
+// Convert an ISO date string (FITS DATE-OBS, UTC) to Julian Date.
 function isoToJulianDate(iso) {
-    var s = iso.replace(/'/g, "").trim();
-    var m = s.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(\.\d+)?/);
-    if (!m) return null;
-    var Y = parseInt(m[1]), M = parseInt(m[2]), D = parseInt(m[3]);
-    var h = parseInt(m[4]), mn = parseInt(m[5]), sc = parseFloat((m[6]||"0") + (m[7]||""));
-    // Standard JD formula
-    var A = Math.floor((14 - M) / 12);
-    var y = Y + 4800 - A;
-    var mo = M + 12 * A - 3;
-    var JDN = D + Math.floor((153 * mo + 2) / 5) + 365 * y +
-              Math.floor(y / 4) - Math.floor(y / 100) + Math.floor(y / 400) - 32045;
-    return JDN + (h - 12) / 24 + mn / 1440 + sc / 86400;
+    var s = String(iso).replace(/'/g, "").trim();
+    var ms = Date.parse(/Z$|[+-]\d\d:?\d\d$/.test(s) ? s : s + "Z");
+    return isNaN(ms) ? null : ms / 86400000 + 2440587.5;
 }
 
+function keywordValue(win, name) {
+    var k = win.keywords;
+    for (var i = 0; i < k.length; i++)
+        if (k[i].name === name)
+            return String(k[i].value).replace(/'/g, "").trim();
+    return null;
+}
+
+// True when the window carries a full astrometric solution. Pointing
+// keywords from ASIAIR (RA/DEC) do not count, and the solution is stored
+// in XISF properties, so the FITS header looks the same either way.
+function hasAstrometricSolution(win) {
+    try { return !!win.hasAstrometricSolution; } catch (e) { return false; }
+}
+
+#ifndef DISABLE_PLATE_SOLVING
 // Run ImageSolver on an already-open ImageWindow.
-// Skips solving if the image already has a valid astrometric solution.
-// Returns true if solved (or already solved), false on failure.
+// Returns true if solved (or already solved), false on failure. Never
+// throws: a failed solve must not cost us the drizzle stack on disk.
 function runImageSolver(win, drizzleScale) {
-    if (!File.exists(IMAGE_SOLVER_PATH)) {
-        log("  ImageSolver not found at: " + IMAGE_SOLVER_PATH);
-        return false;
-    }
-
-    // ImageSolver is loaded via #include at the top of the file
-    // (PJSR #include is a preprocessor directive, must be at top level)
-
-    // Check if already fully plate-solved (needs ref_I_G transformation matrix,
-    // not just RA/DEC pointing coords from ASIAIR)
-    var checkMeta = new ImageMetadata();
-    checkMeta.ExtractMetadata(win);
-    if (checkMeta.ref_I_G !== null && checkMeta.resolution > 0) {
-        log("  ImageSolver: full plate solution already present (res=" +
-            (checkMeta.resolution * 3600).toFixed(3) + " arcsec/px), skipping.");
+    if (hasAstrometricSolution(win)) {
+        log("  ImageSolver: astrometric solution already present, skipping.");
         return true;
     }
+    var scale = drizzleScale || 1;
+    try {
+        var solver = new ImageSolver();
+        // Loads the settings last saved from the ImageSolver dialog (catalog,
+        // magnitude limits) and reads the image metadata.
+        solver.initialize(win, false);
 
-    var solver = new ImageSolver();
-    solver.solverCfg.useActive            = false;
-    solver.solverCfg.showStars            = false;
-    solver.solverCfg.showDistortion       = false;
-    solver.solverCfg.generateErrorImg     = false;
-    solver.solverCfg.catalog              = "GaiaDR3_XPSD";
-    solver.solverCfg.autoMagnitude        = true;
-    solver.solverCfg.distortionCorrection = true;
-    solver.solverCfg.maxIterations        = 10;
+        var c = solver.solverCfg;
+        c.showStars              = false;
+        c.showStarMatches        = false;
+        c.showDistortion         = false;
+        c.showSimplifiedSurfaces = false;
+        c.generateErrorImg       = false;
+        c.generateDistortModel   = false;
 
-    // Seed metadata from FITS keywords
-    solver.metadata.width    = win.mainView.image.width;
-    solver.metadata.height   = win.mainView.image.height;
-    solver.metadata.xpixsz   = 3.76;  // ASI533 MC Pro pixel size in microns
-    solver.metadata.useFocal = false;
-    // Resolution: native arcsec/px divided by drizzle scale
-    var nativeResolution = 0.733;  // arcsec/px for ASI533 at ~1058mm FL
-    solver.metadata.resolution = (nativeResolution / (drizzleScale || 1)) / 3600;  // degrees/px
-
-    var keys = win.keywords;
-    for (var i = 0; i < keys.length; i++) {
-        var k = keys[i];
-        if (k.name === "RA")       solver.metadata.ra  = parseFloat(k.value);
-        if (k.name === "DEC")      solver.metadata.dec = parseFloat(k.value);
-        if (k.name === "DATE-OBS") {
-            var jd = isoToJulianDate(k.value);
-            if (jd) { solver.metadata.epoch = jd; solver.metadata.observationTime = jd; }
+        var m = solver.metadata;
+        var ra  = parseFloat(keywordValue(win, "RA"));
+        var dec = parseFloat(keywordValue(win, "DEC"));
+        if (!isNaN(ra))  m.ra  = ra;
+        if (!isNaN(dec)) m.dec = dec;
+        if (m.ra === undefined || m.ra === null || isNaN(m.ra) ||
+            m.dec === undefined || m.dec === null || isNaN(m.dec)) {
+            log("  WARNING: ImageSolver skipped — no RA/DEC keywords to seed the solve.");
+            return false;
         }
-        if (k.name === "DATE-END") {
-            var jd2 = isoToJulianDate(k.value);
-            if (jd2) solver.metadata.endTime = jd2;
+
+        var focal = parseFloat(keywordValue(win, "FOCALLEN"));
+        var nativeScale = (focal > 0) ? 206.265 * PIXEL_SIZE_UM / focal
+                                      : FALLBACK_NATIVE_SCALE;
+        var baseScale = nativeScale / scale;   // arcsec/px of this image
+        m.xpixsz   = PIXEL_SIZE_UM / scale;
+        m.useFocal = false;
+
+        var jd = isoToJulianDate(keywordValue(win, "DATE-OBS") || "");
+        if (jd === null) jd = Date.now() / 86400000 + 2440587.5;
+
+        log("  ImageSolver: RA=" + m.ra.toFixed(4) + " Dec=" + m.dec.toFixed(4) +
+            " FOCALLEN=" + (focal > 0 ? focal : "(none)") +
+            " seed=" + baseScale.toFixed(3) + " arcsec/px");
+
+        for (var a = 0; a < SOLVER_SCALE_FACTORS.length; a++) {
+            m.resolution      = (baseScale * SOLVER_SCALE_FACTORS[a]) / 3600;  // deg/px
+            m.observationTime = jd;   // set last: other assignments can clear it
+            try {
+                // solveImage() returns nothing in 6.5.0; the window is the truth.
+                solver.solveImage(win);
+            } catch (se) {
+                log("  ImageSolver attempt " + (a + 1) + " (" +
+                    (m.resolution * 3600).toFixed(3) + " arcsec/px) error: " +
+                    ((se && se.message) ? se.message : String(se)));
+            }
+            if (hasAstrometricSolution(win)) {
+                log("  ImageSolver: solved at seed " +
+                    (m.resolution * 3600).toFixed(3) + " arcsec/px.");
+                return true;
+            }
         }
-        if (k.name === "FOCALLEN" && parseFloat(k.value) > 0)
-            solver.metadata.focal = parseFloat(k.value) / (drizzleScale || 1);
+        log("  WARNING: ImageSolver found no solution — image saved without astrometry.");
+        return false;
+    } catch (e) {
+        log("  WARNING: ImageSolver failed: " + ((e && e.message) ? e.message : String(e)));
+        return false;
     }
-
-    log("  ImageSolver: RA=" + solver.metadata.ra.toFixed(4) +
-        " Dec=" + solver.metadata.dec.toFixed(4) +
-        " res=" + (solver.metadata.resolution * 3600).toFixed(3) + " arcsec/px");
-
-    var result = solver.SolveImage(win);
-    if (result) {
-        log("  ImageSolver: solved successfully.");
-    } else {
-        log("  WARNING: ImageSolver failed — image will not have astrometric solution.");
-    }
-    return result;
 }
+#endif
 
 
 // Maximum number of days to search forward/backward from session date
@@ -346,20 +342,23 @@ function friendlyName(rawName) {
 function fileExists(p) { return File.exists(p); }
 
 function ensureDir(p) {
-    // Folders are pre-created by create_processed_folders.ps1 (run from Windows).
-    // Shell fallback handles any edge cases PI cannot manage itself.
-    if (!File.directoryExists(p)) {
-        var mk = new ExternalProcess;
-        if (isWindows) {
-            var winPath = p.split("/").join("\\");
-            mk.start("cmd.exe", ["/c", "mkdir \"" + winPath + "\" 2>nul"]);
-        } else {
-            mk.start("/bin/mkdir", ["-p", p]);
-        }
-        mk.waitForFinished();
-        if (!File.directoryExists(p))
-            throw new Error("Folder missing — could not create:\n  " + p);
-    }
+    // Folders are normally pre-created by create_processed_folders.ps1, but
+    // the script can now create them itself: PixInsight's own call first,
+    // then a shell mkdir with the path passed as a separate argument (so
+    // spaces and hyphens in object names need no hand quoting).
+    if (File.directoryExists(p)) return;
+    try { File.createDirectory(p, true); } catch (e) {}
+    if (File.directoryExists(p)) return;
+
+    var mk = new ExternalProcess;
+    if (isWindows)
+        mk.start("cmd.exe", ["/c", "mkdir", p.split("/").join("\\")]);
+    else
+        mk.start("/bin/mkdir", ["-p", p]);
+    mk.waitForFinished();
+    if (!File.directoryExists(p))
+        throw new Error("Folder missing — could not create:\n  " + p +
+                        "\n  Run create_processed_folders.ps1 and retry.");
 }
 
 // Remove files in dir whose names do not start with "Light_".
@@ -1419,8 +1418,9 @@ function processSession(objectName, dateStr, sourceDir, processedBase) {
                 var solved = runImageSolver(drizzleWin, DRIZZLE_SCALE);
                 if (solved) {
                     log("  Plate solution applied — saving to disk...");
-                    // Save with preserve=true to retain XISF properties including WCS
-                    drizzleWin.saveAs(drizzleOut, false, false, false, true);
+                    // Solution lives in XISF properties; a plain saveAs keeps it
+                    // (args: path, queryOptions, allowMessages, strict, verifyOverwrite).
+                    drizzleWin.saveAs(drizzleOut, false, false, false, false);
                     log("  Plate solution saved to: " + drizzleOut);
                     // Close everything except the solved drizzle window
                     var allWC = ImageWindow.windows;
@@ -1549,7 +1549,7 @@ dlg.initialPath = NAS_RAW_ROOT;
 if (!dlg.execute()) {
     Console.writeln("Cancelled.");
 } else {
-    var sel = dlg.directory;
+    var sel = dlg.directoryPath;
     Console.writeln("\nSelected: " + sel);
 
     var allOutputs = [];
