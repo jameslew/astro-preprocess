@@ -96,6 +96,19 @@ var BAYER_PATTERN = 0;
 // Requires generateDrizzleData = true in StarAlignment (already set).
 var DRIZZLE_SCALE = 2.0;
 
+// ── Process enum resolvers ───────────────────────────────────
+// PixInsight 1.9.4 (V8) moved process enum constants off <Process>.prototype
+// and onto the constructor object itself — e.g. StarAlignment.DDMThinPlateSpline
+// instead of StarAlignment.prototype.DDMThinPlateSpline (the latter is now
+// undefined). These resolvers pick whichever location actually holds the
+// constants, so the SA/II/DI config below works on 1.9.4 and older builds alike.
+// All constant references use SAk./IIk./DIk. accordingly.
+var SAk = (StarAlignment.RegisterMatch      !== undefined) ? StarAlignment      : StarAlignment.prototype;
+var IIk = (ImageIntegration.Average         !== undefined) ? ImageIntegration   : ImageIntegration.prototype;
+var DIk = (DrizzleIntegration.Kernel_Square !== undefined) ? DrizzleIntegration : DrizzleIntegration.prototype;
+var ICk = (ImageCalibration.Auto            !== undefined) ? ImageCalibration   : ImageCalibration.prototype;
+var LNk = (LocalNormalization.PSFType_Auto  !== undefined) ? LocalNormalization : LocalNormalization.prototype;
+
 #ifndef DISABLE_PLATE_SOLVING
 // ── Solver-only scaffold (skipped while DISABLE_PLATE_SOLVING is set) ──
 // NOTE: this is AdP/SpiderMonkey-era scaffolding. Under ImageSolver 6.4.1
@@ -480,11 +493,11 @@ function buildMasterDark(darkRawFiles, outputFile) {
     var II = new ImageIntegration;
     II.images                   = images;
     II.inputHints               = "fits-keywords normalize raw cfa use-roworder-keywords signed-is-physical";
-    II.combination              = ImageIntegration.prototype.Average;
-    II.weightMode               = ImageIntegration.prototype.NoiseEvaluation;
-    II.normalization            = ImageIntegration.prototype.NoNormalization;
-    II.rejection                = ImageIntegration.prototype.WinsorizedSigmaClip;
-    II.rejectionNormalization   = ImageIntegration.prototype.Scale;
+    II.combination              = IIk.Average;
+    II.weightMode               = IIk.NoiseEvaluation;
+    II.normalization            = IIk.NoNormalization;
+    II.rejection                = IIk.WinsorizedSigmaClip;
+    II.rejectionNormalization   = IIk.Scale;
     II.sigmaLow                 = 4.000;
     II.sigmaHigh                = 3.000;
     II.winsorizationCutoff      = 5.000;
@@ -563,11 +576,11 @@ function buildMasterFlat(flatRawFiles, masterDarkFile, outputFile) {
             flatTargets.push([true, flatRawFiles[i]]);
         ICF.targetFrames            = flatTargets;
         ICF.enableCFA               = true;
-        ICF.cfaPattern              = ImageCalibration.prototype.Auto;
+        ICF.cfaPattern              = ICk.Auto;
         ICF.inputHints              = "fits-keywords normalize only-first-image raw cfa use-roworder-keywords signed-is-physical";
         ICF.outputHints             = "properties fits-keywords no-compress-data block-alignment 4096 max-inline-block-size 3072 no-embedded-data no-resolution ";
         ICF.pedestal                = 0;
-        ICF.pedestalMode            = ImageCalibration.prototype.Keyword;
+        ICF.pedestalMode            = ICk.Keyword;
         ICF.masterBiasEnabled       = false;
         ICF.masterDarkEnabled       = true;
         ICF.masterDarkPath          = masterDarkFile;
@@ -576,7 +589,7 @@ function buildMasterFlat(flatRawFiles, masterDarkFile, outputFile) {
         ICF.calibrateDark           = false;
         ICF.calibrateFlat           = false;
         ICF.optimizeDarks           = false;
-        ICF.darkCFADetectionMode    = ImageCalibration.prototype.DetectCFA;
+        ICF.darkCFADetectionMode    = ICk.DetectCFA;
         ICF.separateCFAFlatScalingFactors = false;
         ICF.flatScaleClippingFactor = 0.05;
         ICF.evaluateNoise           = false;
@@ -585,9 +598,9 @@ function buildMasterFlat(flatRawFiles, masterDarkFile, outputFile) {
         ICF.outputExtension         = ".xisf";
         ICF.outputPrefix            = "";
         ICF.outputPostfix           = "_c";
-        ICF.outputSampleFormat      = ImageCalibration.prototype.f32;
+        ICF.outputSampleFormat      = ICk.f32;
         ICF.overwriteExistingFiles  = true;
-        ICF.onError                 = ImageCalibration.prototype.Continue;
+        ICF.onError                 = ICk.Continue;
         ICF.noGUIMessages           = true;
         ICF.useFileThreads          = true;
         ICF.fileThreadOverload      = 1.00;
@@ -619,11 +632,11 @@ function buildMasterFlat(flatRawFiles, masterDarkFile, outputFile) {
     II.images                   = images;
     II.inputHints               = (masterDarkFile !== null) ? "" :
                                    "fits-keywords normalize raw cfa use-roworder-keywords signed-is-physical";
-    II.combination              = ImageIntegration.prototype.Average;
-    II.weightMode               = ImageIntegration.prototype.NoiseEvaluation;
-    II.normalization            = ImageIntegration.prototype.Multiplicative;
-    II.rejection                = ImageIntegration.prototype.WinsorizedSigmaClip;
-    II.rejectionNormalization   = ImageIntegration.prototype.Scale;
+    II.combination              = IIk.Average;
+    II.weightMode               = IIk.NoiseEvaluation;
+    II.normalization            = IIk.Multiplicative;
+    II.rejection                = IIk.WinsorizedSigmaClip;
+    II.rejectionNormalization   = IIk.Scale;
     II.sigmaLow                 = 4.000;
     II.sigmaHigh                = 3.000;
     II.winsorizationCutoff      = 5.000;
@@ -697,20 +710,20 @@ function runImageCalibration(rawFitFiles, outputDir, masterDarkFile, masterFlatF
 
     // CFA-mode: calibrate raw Bayer pattern before debayering
     IC.enableCFA               = true;
-    IC.cfaPattern              = ImageCalibration.prototype.Auto;
+    IC.cfaPattern              = ICk.Auto;
     IC.inputHints              = "fits-keywords normalize only-first-image raw cfa use-roworder-keywords signed-is-physical";
     IC.outputHints             = "properties fits-keywords no-compress-data block-alignment 4096 max-inline-block-size 3072 no-embedded-data no-resolution ";
     IC.pedestal                = 0;
-    IC.pedestalMode            = ImageCalibration.prototype.Keyword;
+    IC.pedestalMode            = ICk.Keyword;
     IC.pedestalKeyword         = "";
 
     IC.outputDirectory         = outputDir;
     IC.outputExtension         = ".xisf";
     IC.outputPrefix            = "";
     IC.outputPostfix           = "_c";
-    IC.outputSampleFormat      = ImageCalibration.prototype.f32;
+    IC.outputSampleFormat      = ICk.f32;
     IC.overwriteExistingFiles  = true;
-    IC.onError                 = ImageCalibration.prototype.Continue;
+    IC.onError                 = ICk.Continue;
 
     // Master dark
     IC.masterBiasEnabled       = false;
@@ -726,12 +739,12 @@ function runImageCalibration(rawFitFiles, outputDir, masterDarkFile, masterFlatF
     IC.darkOptimizationThreshold = 0.00000;
     IC.darkOptimizationLow     = 3.0000;
     IC.darkOptimizationWindow  = 0;
-    IC.darkCFADetectionMode    = ImageCalibration.prototype.DetectCFA;
+    IC.darkCFADetectionMode    = ICk.DetectCFA;
     IC.separateCFAFlatScalingFactors = true;
     IC.flatScaleClippingFactor = 0.05;
 
     IC.evaluateNoise           = true;
-    IC.noiseEvaluationAlgorithm = ImageCalibration.prototype.NoiseEvaluation_MRS;
+    IC.noiseEvaluationAlgorithm = ICk.NoiseEvaluation_MRS;
     IC.evaluateSignal          = true;
     IC.structureLayers         = 5;
     IC.saturationThreshold     = 1.00;
@@ -740,7 +753,7 @@ function runImageCalibration(rawFitFiles, outputDir, masterDarkFile, masterFlatF
     IC.hotPixelFilterRadius    = 1;
     IC.noiseReductionFilterRadius = 0;
     IC.minStructureSize        = 0;
-    IC.psfType                 = ImageCalibration.prototype.PSFType_Moffat4;
+    IC.psfType                 = ICk.PSFType_Moffat4;
     IC.psfGrowth               = 1.00;
     IC.maxStars                = 24576;
 
@@ -863,7 +876,7 @@ function runLocalNormalization(registeredFiles, referenceFile, outputDir) {
     LN.hotPixelFilterRadius     = 2;
     LN.noiseReductionFilterRadius = 0;
     LN.modelScalingFactor       = 8;
-    LN.scaleEvaluationMethod    = LocalNormalization.prototype.ScaleEvaluationMethod_PSFSignal;
+    LN.scaleEvaluationMethod    = LNk.ScaleEvaluationMethod_PSFSignal;
     LN.localScaleCorrections    = false;
     LN.psfStructureLayers       = 5;
     LN.saturationThreshold      = 0.75;
@@ -876,10 +889,10 @@ function runLocalNormalization(registeredFiles, referenceFile, outputDir) {
     LN.psfMinStructureSize      = 0;
     LN.psfMinSNR                = 40;
     LN.psfAllowClusteredSources = true;
-    LN.psfType                  = LocalNormalization.prototype.PSFType_Auto;
+    LN.psfType                  = LNk.PSFType_Auto;
     LN.psfGrowth                = 1.00;
     LN.psfMaxStars              = 24576;
-    LN.generateNormalizedImages = LocalNormalization.prototype.GenerateNormalizedImages_GlobalExecutionOnly;
+    LN.generateNormalizedImages = LNk.GenerateNormalizedImages_GlobalExecutionOnly;
     LN.generateNormalizationData = true;
     LN.generateInvalidData      = false;
     LN.generateHistoryProperties = true;
@@ -890,7 +903,7 @@ function runLocalNormalization(registeredFiles, referenceFile, outputDir) {
     LN.outputPrefix             = "";
     LN.outputPostfix            = "_n";
     LN.overwriteExistingFiles   = true;
-    LN.onError                  = LocalNormalization.prototype.OnError_Continue;
+    LN.onError                  = LNk.OnError_Continue;
     LN.useFileThreads           = true;
     LN.fileThreadOverload       = 1.00;
     LN.maxFileReadThreads       = 0;
@@ -942,7 +955,7 @@ function runStarAlignment(inputFiles, outputDir) {
     SA.distortionCorrection         = false;
     SA.distortionMaxIterations      = 20;
     SA.distortionMatcherExpansion   = 1.00;
-    SA.rbfType                      = StarAlignment.prototype.DDMThinPlateSpline;
+    SA.rbfType                      = SAk.DDMThinPlateSpline;
     SA.maxSplinePoints              = 4000;
     SA.splineOrder                  = 2;
     SA.splineSmoothness             = 0.005;
@@ -957,13 +970,13 @@ function runStarAlignment(inputFiles, outputDir) {
     SA.ransacMaximizeRegularity     = 1.00;
     SA.ransacMinimizeError          = 1.00;
     SA.maxStars                     = 0;
-    SA.fitPSF                       = StarAlignment.prototype.FitPSF_DistortionOnly;
+    SA.fitPSF                       = SAk.FitPSF_DistortionOnly;
     SA.psfTolerance                 = 0.50;
     SA.useTriangles                 = false;
     SA.polygonSides                 = 5;
     SA.descriptorsPerStar           = 20;
     SA.restrictToPreviews           = false;  // false for global execution
-    SA.intersection                 = StarAlignment.prototype.MosaicOnly;
+    SA.intersection                 = SAk.MosaicOnly;
     SA.useBrightnessRelations       = false;
     SA.useScaleDifferences          = false;
     SA.scaleTolerance               = 0.100;
@@ -972,7 +985,7 @@ function runStarAlignment(inputFiles, outputDir) {
     SA.targets                      = targets;
     SA.inputHints                   = "fits-keywords normalize only-first-image";
     SA.outputHints                  = "properties fits-keywords no-compress-data block-alignment 4096 max-inline-block-size 3072 no-embedded-data no-resolution no-icc-profile";
-    SA.mode                         = StarAlignment.prototype.RegisterMatch;
+    SA.mode                         = SAk.RegisterMatch;
     SA.writeKeywords                = true;
     SA.generateMasks                = false;
     SA.generateDrizzleData          = true;
@@ -981,15 +994,15 @@ function runStarAlignment(inputFiles, outputDir) {
     SA.inheritAstrometricSolution   = true;
     SA.frameAdaptation              = false;
     SA.randomizeMosaic              = false;
-    SA.pixelInterpolation           = StarAlignment.prototype.Auto;
+    SA.pixelInterpolation           = SAk.Auto;
     SA.clampingThreshold            = 0.30;
     SA.outputDirectory              = outputDir;
     SA.outputExtension              = ".xisf";
     SA.outputPrefix                 = "";
     SA.outputPostfix                = "_r";
-    SA.outputSampleFormat           = StarAlignment.prototype.f32;
+    SA.outputSampleFormat           = SAk.f32;
     SA.overwriteExistingFiles       = true;
-    SA.onError                      = StarAlignment.prototype.Continue;
+    SA.onError                      = SAk.Continue;
     SA.useFileThreads               = true;
     SA.fileThreadOverload           = 1.00;
     SA.memoryLoadControl            = true;
@@ -1037,17 +1050,17 @@ function runImageIntegration(registeredFiles, drizzleFiles, outputDir, normDataF
     II.inputHints                       = "";
     II.overrideImageType                = false;
     II.imageType                        = 0;
-    II.combination                      = ImageIntegration.prototype.Average;
-    II.weightMode                       = ImageIntegration.prototype.PSFSignalWeight;
+    II.combination                      = IIk.Average;
+    II.weightMode                       = IIk.PSFSignalWeight;
     II.weightKeyword                    = "WBPPWGHT";
-    II.weightScale                      = ImageIntegration.prototype.WeightScale_BWMV;
+    II.weightScale                      = IIk.WeightScale_BWMV;
     II.minWeight                        = 0.050000;
     II.adaptiveGridSize                 = 16;
     II.adaptiveNoScale                  = false;
     II.ignoreNoiseKeywords              = false;
-    II.normalization                    = ImageIntegration.prototype.AdditiveWithScaling;
-    II.rejection                        = ImageIntegration.prototype.WinsorizedSigmaClip;
-    II.rejectionNormalization           = ImageIntegration.prototype.Scale;
+    II.normalization                    = IIk.AdditiveWithScaling;
+    II.rejection                        = IIk.WinsorizedSigmaClip;
+    II.rejectionNormalization           = IIk.Scale;
     II.minMaxLow                        = 1;
     II.minMaxHigh                       = 1;
     II.pcClipLow                        = 0.200;
@@ -1089,10 +1102,10 @@ function runImageIntegration(registeredFiles, drizzleFiles, outputDir, normDataF
     II.useROI                           = false;
     II.useCache                         = true;
     II.evaluateSNR                      = true;
-    II.noiseEvaluationAlgorithm         = ImageIntegration.prototype.NoiseEvaluation_MRS;
+    II.noiseEvaluationAlgorithm         = IIk.NoiseEvaluation_MRS;
     II.mrsMinDataFraction               = 0.010;
     II.psfStructureLayers               = 5;
-    II.psfType                          = ImageIntegration.prototype.PSFType_Moffat4;
+    II.psfType                          = IIk.PSFType_Moffat4;
     II.generateFITSKeywords             = true;
     II.subtractPedestals                = false;
     II.truncateOnOutOfRange             = false;
@@ -1137,7 +1150,7 @@ function runDrizzleIntegration(drizzleFiles, outputFile) {
     DI.inputDirectory               = "";
     DI.scale                        = DRIZZLE_SCALE;
     DI.dropShrink                   = 1.00;
-    DI.kernelFunction               = DrizzleIntegration.prototype.Kernel_Square;
+    DI.kernelFunction               = DIk.Kernel_Square;
     DI.kernelGridSize               = 16;
     DI.originX                      = 0.50;
     DI.originY                      = 0.50;
@@ -1159,7 +1172,7 @@ function runDrizzleIntegration(drizzleFiles, outputFile) {
     DI.truncateOnOutOfRange         = false;
     DI.noGUIMessages                = true;
     DI.showImages                   = true;
-    DI.onError                      = DrizzleIntegration.prototype.Continue;
+    DI.onError                      = DIk.Continue;
 
     if (!DI.executeGlobal())
         throw new Error("DrizzleIntegration failed.");
